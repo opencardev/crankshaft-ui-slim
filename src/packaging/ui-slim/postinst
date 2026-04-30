@@ -1,0 +1,70 @@
+#!/bin/sh
+# Project: Crankshaft
+# This file is part of Crankshaft project.
+# Copyright (C) 2025 OpenCarDev Team
+#
+#  Crankshaft is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  Crankshaft is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with Crankshaft. If not, see <http://www.gnu.org/licenses/>.
+
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+case "$1" in
+    configure)
+        # Ensure crankshaft user exists even if slim UI package is installed first.
+        if ! id -u crankshaft > /dev/null 2>&1; then
+            if command -v adduser >/dev/null 2>&1; then
+                adduser --system --group --no-create-home crankshaft || true
+            else
+                useradd --system --user-group --no-create-home --shell /usr/sbin/nologin crankshaft || true
+            fi
+        fi
+
+        # Ensure aasdk group exists and grant crankshaft access to aasdk cert/key.
+        if ! getent group aasdk > /dev/null 2>&1; then
+            if command -v addgroup >/dev/null 2>&1; then
+                addgroup --system aasdk || true
+            else
+                groupadd --system aasdk || true
+            fi
+        fi
+
+        # Add crankshaft user to required groups for display/hardware and aasdk access.
+        usermod -a -G video,audio,input,render,plugdev,aasdk crankshaft 2>/dev/null || true
+        
+        # Create slim-ui specific directories
+        mkdir -p /var/lib/crankshaft/slim-ui || true
+        mkdir -p /var/log/crankshaft || true
+        chown -R crankshaft:crankshaft /var/lib/crankshaft || true
+        chown -R crankshaft:crankshaft /var/log/crankshaft || true
+        
+        # Set permissions for QML cache directory
+        mkdir -p /var/cache/crankshaft || true
+        chown -R crankshaft:crankshaft /var/cache/crankshaft || true
+        
+        # Reload systemd and enable service when running under systemd
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl enable crankshaft-ui-slim.service >/dev/null 2>&1 || true
+        else
+            echo "Systemd not detected; skipping service enable." >&2
+        fi
+        
+        echo "Crankshaft Slim UI installed successfully"
+        echo "Service enabled and will start on boot"
+        echo "To start now: sudo systemctl start crankshaft-ui-slim"
+        echo "Note: UI includes integrated AndroidAuto support"
+    ;;
+esac
+
+exit 0
