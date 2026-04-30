@@ -228,7 +228,42 @@ if(BUILD_TESTS)
 endif()
 
 # Debian packaging
-set(CRANKSHAFT_VERSION "0.1.0" CACHE STRING "Crankshaft UI Slim package version")
+find_package(Git QUIET)
+
+set(CRANKSHAFT_UI_SLIM_VERSION_FALLBACK "0.1.0")
+set(CRANKSHAFT_UI_SLIM_VERSION_AUTO "${CRANKSHAFT_UI_SLIM_VERSION_FALLBACK}")
+
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --short=8 HEAD
+        OUTPUT_VARIABLE CRANKSHAFT_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} describe --tags --abbrev=0
+        OUTPUT_VARIABLE CRANKSHAFT_GIT_TAG
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} show -s --format=%cd --date=format:%Y.%m.%d HEAD
+        OUTPUT_VARIABLE CRANKSHAFT_GIT_DATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+
+    if(CRANKSHAFT_GIT_SHA)
+        if(CRANKSHAFT_GIT_TAG)
+            string(REGEX REPLACE "^v" "" CRANKSHAFT_TAG_CLEAN "${CRANKSHAFT_GIT_TAG}")
+            set(CRANKSHAFT_UI_SLIM_VERSION_AUTO "${CRANKSHAFT_TAG_CLEAN}+git.${CRANKSHAFT_GIT_SHA}")
+        elseif(CRANKSHAFT_GIT_DATE)
+            set(CRANKSHAFT_UI_SLIM_VERSION_AUTO "${CRANKSHAFT_GIT_DATE}+git.${CRANKSHAFT_GIT_SHA}")
+        endif()
+    endif()
+endif()
+
+set(CRANKSHAFT_VERSION "${CRANKSHAFT_UI_SLIM_VERSION_AUTO}" CACHE STRING "Crankshaft UI Slim package version")
 set(CPACK_GENERATOR "DEB;TGZ")
 set(CPACK_PACKAGE_NAME "crankshaft-ui-slim")
 set(CPACK_PACKAGE_VENDOR "OpenCarDev")
