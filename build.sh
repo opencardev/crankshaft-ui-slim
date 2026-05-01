@@ -251,7 +251,9 @@ if [[ -n "${DISTRO_ID:-}" ]]; then
 fi
 
 if [[ -n "${VERSION}" ]]; then
-  cmake_args+=("-DCRANKSHAFT_VERSION=${VERSION}")
+  cmake_args+=("-DCRANKSHAFT_UI_SLIM_VERSION_OVERRIDE=${VERSION}")
+else
+  cmake_args+=("-UCRANKSHAFT_UI_SLIM_VERSION_OVERRIDE")
 fi
 
 if [[ "${ENABLE_COVERAGE}" == "ON" ]]; then
