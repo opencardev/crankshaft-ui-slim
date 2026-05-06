@@ -27,8 +27,12 @@ case "$1" in
         if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             echo "[prerm ui-slim] stopping service"
             systemctl stop crankshaft-ui-slim.service >/dev/null 2>&1 || true
+            echo "[prerm ui-slim] stopping display setup service"
+            systemctl stop crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
             echo "[prerm ui-slim] disabling service"
             systemctl disable crankshaft-ui-slim.service >/dev/null 2>&1 || true
+            echo "[prerm ui-slim] disabling display setup service"
+            systemctl disable crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
         fi
 
         # If systemd handled stop, avoid further manual killing to prevent accidental TERM
@@ -49,6 +53,8 @@ case "$1" in
         if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             echo "[prerm ui-slim] stopping service"
             systemctl stop crankshaft-ui-slim.service >/dev/null 2>&1 || true
+            echo "[prerm ui-slim] stopping display setup service"
+            systemctl stop crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
         fi
 
         # Wait for process to exit (with timeout)

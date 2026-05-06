@@ -55,6 +55,7 @@ case "$1" in
         # Reload systemd and enable service when running under systemd
         if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl enable crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
             systemctl enable crankshaft-ui-slim.service >/dev/null 2>&1 || true
         else
             echo "Systemd not detected; skipping service enable." >&2

@@ -221,6 +221,17 @@ install(FILES ${CMAKE_SOURCE_DIR}/packaging/ui-slim/crankshaft-ui-slim.service
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system
   COMPONENT ui-slim
 )
+
+# Install display setup oneshot service and helper script
+install(FILES ${CMAKE_SOURCE_DIR}/packaging/ui-slim/crankshaft-ui-slim-display-setup.service
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system
+    COMPONENT ui-slim
+)
+
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/ui-slim/crankshaft-ui-slim-display-setup.sh
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/crankshaft
+    COMPONENT ui-slim
+)
 # Tests
 if(BUILD_TESTS)
     enable_testing()

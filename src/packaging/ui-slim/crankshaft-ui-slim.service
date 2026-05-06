@@ -18,8 +18,8 @@
 [Unit]
 Description=Crankshaft Slim AndroidAuto UI Service
 Documentation=https://github.com/opencardev/crankshaft.core
-After=crankshaft-core.service graphical.target network.target
-Requires=crankshaft-core.service
+After=crankshaft-ui-slim-display-setup.service crankshaft-core.service graphical.target network.target
+Requires=crankshaft-ui-slim-display-setup.service crankshaft-core.service
 Wants=graphical.target
 
 [Service]
@@ -31,6 +31,7 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+EnvironmentFile=-/run/crankshaft/ui-slim-display.env
 
 # Environment for Qt platform (EGLFS for physical display, VNC for remote)
 Environment="QT_QPA_PLATFORM=eglfs"
