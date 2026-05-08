@@ -294,7 +294,7 @@ set(CPACK_PACKAGE_VENDOR "OpenCarDev")
 set(CPACK_PACKAGE_CONTACT "OpenCarDev Team")
 set(CPACK_PACKAGE_VERSION "${CRANKSHAFT_VERSION}")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "crankshaft-core")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "crankshaft-core, libqt6core6, libqt6gui6, libqt6qml6, libqt6quick6, libqt6multimedia6, libqt6sql6, libqt6network6, libqt6websockets6, libqt6dbus6, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qt6-qpa-plugins")
 set(CPACK_COMPONENTS_ALL ui-slim)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_SOURCE_DIR}/packaging/ui-slim/postinst;${CMAKE_SOURCE_DIR}/packaging/ui-slim/prerm"

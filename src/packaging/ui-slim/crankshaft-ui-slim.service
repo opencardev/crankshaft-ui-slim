@@ -33,6 +33,13 @@ StandardOutput=journal
 StandardError=journal
 EnvironmentFile=-/run/crankshaft/ui-slim-display.env
 
+# Service user has no login home; provide explicit writable runtime/data paths.
+Environment="HOME=/var/lib/crankshaft/slim-ui"
+Environment="XDG_CONFIG_HOME=/var/lib/crankshaft/slim-ui/.config"
+Environment="XDG_DATA_HOME=/var/lib/crankshaft/slim-ui/.local/share"
+Environment="XDG_STATE_HOME=/var/lib/crankshaft/slim-ui/.local/state"
+Environment="XDG_CACHE_HOME=/var/cache/crankshaft"
+
 # Environment for Qt platform (EGLFS for physical display, VNC for remote)
 Environment="QT_QPA_PLATFORM=eglfs"
 Environment="QT_QPA_EGLFS_INTEGRATION=eglfs_kms"
@@ -56,7 +63,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/crankshaft /var/log/crankshaft /run/crankshaft
+ReadWritePaths=/var/lib/crankshaft /var/log/crankshaft /var/cache/crankshaft /run/crankshaft
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

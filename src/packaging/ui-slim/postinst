@@ -44,6 +44,9 @@ case "$1" in
         
         # Create slim-ui specific directories
         mkdir -p /var/lib/crankshaft/slim-ui || true
+        mkdir -p /var/lib/crankshaft/slim-ui/.config || true
+        mkdir -p /var/lib/crankshaft/slim-ui/.local/share || true
+        mkdir -p /var/lib/crankshaft/slim-ui/.local/state || true
         mkdir -p /var/log/crankshaft || true
         chown -R crankshaft:crankshaft /var/lib/crankshaft || true
         chown -R crankshaft:crankshaft /var/log/crankshaft || true
