@@ -17,7 +17,7 @@
 
 [Unit]
 Description=Crankshaft Slim UI Display Setup
-Documentation=https://github.com/opencardev/crankshaft.core
+Documentation=https://github.com/opencardev/crankshaft-ui-slim
 DefaultDependencies=no
 After=local-fs.target systemd-udev-settle.service
 Before=crankshaft-ui-slim.service
@@ -29,4 +29,5 @@ ExecStart=/usr/libexec/crankshaft/crankshaft-ui-slim-display-setup.sh
 RemainAfterExit=yes
 
 [Install]
+WantedBy=multi-user.target
 WantedBy=graphical.target

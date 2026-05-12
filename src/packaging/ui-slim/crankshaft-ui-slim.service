@@ -17,7 +17,7 @@
 
 [Unit]
 Description=Crankshaft Slim AndroidAuto UI Service
-Documentation=https://github.com/opencardev/crankshaft.core
+Documentation=https://github.com/opencardev/crankshaft-ui-slim
 After=crankshaft-ui-slim-display-setup.service crankshaft-core.service graphical.target network.target
 Requires=crankshaft-ui-slim-display-setup.service crankshaft-core.service
 Wants=graphical.target
@@ -76,4 +76,5 @@ CPUQuota=80%
 WatchdogSec=30
 
 [Install]
+WantedBy=multi-user.target
 WantedBy=graphical.target
