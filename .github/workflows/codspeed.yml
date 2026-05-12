@@ -1,0 +1,49 @@
+name: CodSpeed
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          chmod +x ./build.sh
+          BUILD_TESTS=OFF ./build.sh --install-deps
+
+      - name: Build benchmarks
+        run: |
+          cmake -S src -B build-bench -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_BENCHMARKS=ON \
+            -DCODSPEED_MODE=instrumentation
+          cmake --build build-bench \
+            --target bench_logger bench_preferences bench_settings_migration bench_error_handler \
+            --parallel "$(nproc)"
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: |
+            ./build-bench/ui-slim/benchmarks/bench_logger
+            ./build-bench/ui-slim/benchmarks/bench_preferences
+            ./build-bench/ui-slim/benchmarks/bench_settings_migration
+            ./build-bench/ui-slim/benchmarks/bench_error_handler
