@@ -8,6 +8,7 @@
 
 #include "Logger.h"
 
+// cppcheck-suppress constParameterCallback
 static void BM_LoggerFormatJsonEntry(benchmark::State &state) {
     QJsonObject entry{
         {QStringLiteral("component"), QStringLiteral("Benchmark")},
@@ -25,6 +26,7 @@ static void BM_LoggerFormatJsonEntry(benchmark::State &state) {
 }
 BENCHMARK(BM_LoggerFormatJsonEntry);
 
+// cppcheck-suppress constParameterCallback
 static void BM_LoggerFormatWithMetadata(benchmark::State &state) {
     QJsonObject entry{
         {QStringLiteral("component"), QStringLiteral("ConnectionManager")},
@@ -51,6 +53,7 @@ static void BM_LoggerFormatWithMetadata(benchmark::State &state) {
 }
 BENCHMARK(BM_LoggerFormatWithMetadata);
 
+// cppcheck-suppress constParameterCallback
 static void BM_LoggerLevelFiltering(benchmark::State &state) {
     Logger &logger = Logger::instance();
     logger.setLevel(Logger::Level::Warning);

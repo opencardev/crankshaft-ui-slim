@@ -5,6 +5,7 @@
 
 #include "ErrorHandler.h"
 
+// cppcheck-suppress constParameterCallback
 static void BM_ErrorCodeToString(benchmark::State &state) {
     ErrorHandler handler;
     for (auto _ : state) {
@@ -17,6 +18,7 @@ static void BM_ErrorCodeToString(benchmark::State &state) {
 }
 BENCHMARK(BM_ErrorCodeToString);
 
+// cppcheck-suppress constParameterCallback
 static void BM_ErrorMessageWithContext(benchmark::State &state) {
     ErrorHandler handler;
     for (auto _ : state) {
@@ -30,6 +32,7 @@ static void BM_ErrorMessageWithContext(benchmark::State &state) {
 }
 BENCHMARK(BM_ErrorMessageWithContext);
 
+// cppcheck-suppress constParameterCallback
 static void BM_ClearError(benchmark::State &state) {
     ErrorHandler handler;
     handler.reportError(ErrorHandler::ErrorCode::DeviceNotFound);
@@ -40,6 +43,7 @@ static void BM_ClearError(benchmark::State &state) {
 }
 BENCHMARK(BM_ClearError);
 
+// cppcheck-suppress constParameterCallback
 static void BM_HasErrorCheck(benchmark::State &state) {
     ErrorHandler handler;
     handler.reportError(ErrorHandler::ErrorCode::AudioStreamFailed);
@@ -51,6 +55,7 @@ static void BM_HasErrorCheck(benchmark::State &state) {
 }
 BENCHMARK(BM_HasErrorCheck);
 
+// cppcheck-suppress constParameterCallback
 static void BM_ReportAllErrorCodes(benchmark::State &state) {
     ErrorHandler handler;
     const ErrorHandler::ErrorCode codes[] = {
