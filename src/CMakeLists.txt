@@ -22,6 +22,7 @@ project(crankshaft-ui-slim)
 include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build ui-slim tests" ON)
+option(BUILD_BENCHMARKS "Build ui-slim performance benchmarks" OFF)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
@@ -236,6 +237,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/ui-slim/crankshaft-ui-slim-displa
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Performance benchmarks (Google Benchmark via CodSpeed)
+if(BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 # Debian packaging
