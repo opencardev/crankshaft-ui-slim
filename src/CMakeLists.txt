@@ -177,6 +177,7 @@ qt_add_resources(crankshaft-ui-slim "qml"
         qml/components/SegmentedOptionButton.qml
         qml/components/ThemeToggle.qml
         qml/components/ConnectionPreferenceToggle.qml
+        qml/components/DisplayRotationToggle.qml
         qml/components/FactoryResetButton.qml
         qml/components/SettingsCard.qml
         qml/components/IconFontManager.qml

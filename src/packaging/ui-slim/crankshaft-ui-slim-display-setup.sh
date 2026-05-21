@@ -20,6 +20,27 @@ set -eu
 
 RUN_DIR="/run/crankshaft"
 ENV_FILE="${RUN_DIR}/ui-slim-display.env"
+PREFERENCES_ROOT="/var/lib/crankshaft/slim-ui/.local/share"
+
+read_rotation_preference() {
+    preference_file=$(find "${PREFERENCES_ROOT}" \( -name 'slim-ui-preferences.db' -o -name 'slim-ui-preferences.ini' \) -print -quit 2>/dev/null || true)
+
+    if [ -z "${preference_file}" ] || [ ! -f "${preference_file}" ]; then
+        echo 0
+        return
+    fi
+
+    rotation_value=$(awk -F= '$1 == "slim_ui.display.rotation" { print $2; exit }' "${preference_file}" 2>/dev/null || true)
+
+    case "${rotation_value}" in
+        0|90|180|270)
+            echo "${rotation_value}"
+            ;;
+        *)
+            echo 0
+            ;;
+    esac
+}
 
 mkdir -p "${RUN_DIR}"
 
@@ -46,12 +67,15 @@ for status_file in /sys/class/drm/card*-*/status; do
 done
 
 if [ "${has_connected_display}" -eq 1 ]; then
+    display_rotation=$(read_rotation_preference)
+
     cat > "${ENV_FILE}" << 'EOF'
 QT_QPA_PLATFORM=eglfs
 QT_QPA_EGLFS_INTEGRATION=eglfs_kms
 QT_QPA_EGLFS_ALWAYS_SET_MODE=1
 SLIM_UI_DISPLAY_MODE=physical
 EOF
+    printf 'QT_QPA_EGLFS_ROTATION=%s\n' "${display_rotation}" >> "${ENV_FILE}"
     echo "[crankshaft-ui-slim-display-setup] display detected, selecting physical mode (eglfs)"
 else
     cat > "${ENV_FILE}" << 'EOF'

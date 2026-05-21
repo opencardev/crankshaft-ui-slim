@@ -25,12 +25,14 @@
 
 namespace {
 const char* KEY_DISPLAY_BRIGHTNESS = "slim_ui.display.brightness";
+const char* KEY_DISPLAY_ROTATION = "slim_ui.display.rotation";
 const char* KEY_AUDIO_VOLUME = "slim_ui.audio.volume";
 const char* KEY_CONNECTION_PREFERENCE = "slim_ui.connection.preference";
 const char* KEY_THEME_MODE = "slim_ui.theme.mode";
 const char* KEY_LAST_CONNECTED_DEVICE_ID = "slim_ui.device.lastConnected";
 
 const int DEFAULT_BRIGHTNESS = 50;
+const int DEFAULT_ROTATION = 0;
 const int DEFAULT_VOLUME = 50;
 const int MIN_PERCENTAGE = 0;
 const int MAX_PERCENTAGE = 100;
@@ -43,6 +45,8 @@ PreferencesFacade::PreferencesFacade(ServiceProvider* serviceProvider, QObject* 
 }
 
 auto PreferencesFacade::displayBrightness() const -> int { return m_displayBrightness; }
+
+auto PreferencesFacade::displayRotation() const -> int { return m_displayRotation; }
 
 auto PreferencesFacade::audioVolume() const -> int { return m_audioVolume; }
 
@@ -64,6 +68,20 @@ auto PreferencesFacade::setDisplayBrightness(int value) -> void {
         QStringLiteral("PreferencesFacade"),
         QStringLiteral("Display brightness changed to %1%").arg(m_displayBrightness));
     emit displayBrightnessChanged(m_displayBrightness);
+}
+
+auto PreferencesFacade::setDisplayRotation(int value) -> void {
+    int validated = validateRotation(value);
+    if (validated == m_displayRotation) {
+        return;
+    }
+
+    m_displayRotation = validated;
+    saveSetting(KEY_DISPLAY_ROTATION, m_displayRotation);
+    Logger::instance().infoContext(
+        QStringLiteral("PreferencesFacade"),
+        QStringLiteral("Display rotation changed to %1 degrees").arg(m_displayRotation));
+    emit displayRotationChanged(m_displayRotation);
 }
 
 auto PreferencesFacade::setAudioVolume(int value) -> void {
@@ -152,6 +170,7 @@ auto PreferencesFacade::loadSettings() -> void {
     // Load each setting with validation
     m_displayBrightness =
         validatePercentage(loadSetting(KEY_DISPLAY_BRIGHTNESS, DEFAULT_BRIGHTNESS).toInt());
+    m_displayRotation = validateRotation(loadSetting(KEY_DISPLAY_ROTATION, DEFAULT_ROTATION).toInt());
     m_audioVolume = validatePercentage(loadSetting(KEY_AUDIO_VOLUME, DEFAULT_VOLUME).toInt());
     m_connectionPreference =
         loadSetting(KEY_CONNECTION_PREFERENCE, QStringLiteral("USB")).toString();
@@ -193,6 +212,7 @@ auto PreferencesFacade::saveSettings() -> void {
 
     // Save each setting
     saveSetting(KEY_DISPLAY_BRIGHTNESS, m_displayBrightness);
+    saveSetting(KEY_DISPLAY_ROTATION, m_displayRotation);
     saveSetting(KEY_AUDIO_VOLUME, m_audioVolume);
     saveSetting(KEY_CONNECTION_PREFERENCE, m_connectionPreference);
     saveSetting(KEY_THEME_MODE, m_themeMode);
@@ -208,6 +228,7 @@ auto PreferencesFacade::resetToDefaults() -> void {
                                    QStringLiteral("Resetting settings to factory defaults"));
 
     m_displayBrightness = DEFAULT_BRIGHTNESS;
+    m_displayRotation = DEFAULT_ROTATION;
     m_audioVolume = DEFAULT_VOLUME;
     m_connectionPreference = QStringLiteral("USB");
     m_themeMode = QStringLiteral("DARK");
@@ -216,6 +237,7 @@ auto PreferencesFacade::resetToDefaults() -> void {
     saveSettings();
 
     emit displayBrightnessChanged(m_displayBrightness);
+    emit displayRotationChanged(m_displayRotation);
     emit audioVolumeChanged(m_audioVolume);
     emit connectionPreferenceChanged(m_connectionPreference);
     emit themeModeChanged(m_themeMode);
@@ -259,6 +281,21 @@ auto PreferencesFacade::validatePercentage(int value) const -> int {
     return value;
 }
 
+auto PreferencesFacade::validateRotation(int value) const -> int {
+    switch (value) {
+        case 0:
+        case 90:
+        case 180:
+        case 270:
+            return value;
+        default:
+            Logger::instance().warningContext(
+                QStringLiteral("PreferencesFacade"),
+                QStringLiteral("Invalid display rotation: %1, resetting to default").arg(value));
+            return DEFAULT_ROTATION;
+    }
+}
+
 auto PreferencesFacade::detectAndRecoverCorruption() -> QString {
     QStringList recoveredFields;
 
@@ -270,6 +307,15 @@ auto PreferencesFacade::detectAndRecoverCorruption() -> QString {
                 .arg(m_displayBrightness));
         m_displayBrightness = DEFAULT_BRIGHTNESS;
         recoveredFields << QStringLiteral("brightness");
+    }
+
+    if (m_displayRotation != 0 && m_displayRotation != 90 && m_displayRotation != 180 &&
+        m_displayRotation != 270) {
+        Logger::instance().warningContext(
+            QStringLiteral("PreferencesFacade"),
+            QStringLiteral("Corrupted rotation: %1, resetting to default").arg(m_displayRotation));
+        m_displayRotation = DEFAULT_ROTATION;
+        recoveredFields << QStringLiteral("rotation");
     }
 
     if (m_audioVolume < MIN_PERCENTAGE || m_audioVolume > MAX_PERCENTAGE) {

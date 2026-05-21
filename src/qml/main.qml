@@ -30,6 +30,7 @@ ApplicationWindow {
     height: 480
     title: qsTr("Crankshaft Slim UI - AndroidAuto")
     property string lastShownConnectionError: ""
+    property int displayRotation: 0
     
     // Theme Manager - centralized theme control
     ThemeManager {
@@ -71,6 +72,9 @@ ApplicationWindow {
         function onThemeModeChanged(mode) {
             theme.setTheme(mode)
         }
+        function onDisplayRotationChanged(rotation) {
+            root.displayRotation = rotation
+        }
     }
     
     // Watch for errors from ErrorHandler
@@ -85,6 +89,7 @@ ApplicationWindow {
     Component.onCompleted: {
         if (_preferencesFacade) {
             theme.setTheme(_preferencesFacade.themeMode)
+            displayRotation = _preferencesFacade.displayRotation
         }
 
         if (_connectionStateMachine) {
@@ -167,7 +172,17 @@ ApplicationWindow {
     
     // Main content area with state-based view switching
     Item {
-        anchors.fill: parent
+        id: mainContent
+        anchors.centerIn: parent
+        width: (root.displayRotation === 90 || root.displayRotation === 270) ? parent.height : parent.width
+        height: (root.displayRotation === 90 || root.displayRotation === 270) ? parent.width : parent.height
+        clip: true
+
+        transform: Rotation {
+            angle: root.displayRotation
+            origin.x: mainContent.width / 2
+            origin.y: mainContent.height / 2
+        }
         
         // Background
         Rectangle {
@@ -547,6 +562,7 @@ ApplicationWindow {
         // Settings Panel Overlay (T054-T055)
         SettingsPanel {
             id: settingsPanel
+            displayRotation: root.displayRotation
             onClosed: navigationController.closeSettings()
         }
     }

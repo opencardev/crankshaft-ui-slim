@@ -107,61 +107,66 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
         return 1;
     }
 
-    AndroidAutoFacade androidAutoFacade(&services);
-    DeviceManager deviceManager(&services, &androidAutoFacade);
-    AudioBridge audioBridge(&services);
-    BluetoothAdapter bluetoothAdapter(services.androidAutoService());
-    TouchEventForwarder touchForwarder(&androidAutoFacade, &services);
-    ConnectionStateMachine connectionStateMachine(&androidAutoFacade);
+    int exitCode = 0;
 
-    PreferencesFacade preferencesFacade(&services);
-    ErrorHandler errorHandler;
+    {
+        AndroidAutoFacade androidAutoFacade(&services);
+        DeviceManager deviceManager(&services, &androidAutoFacade);
+        AudioBridge audioBridge(&services);
+        BluetoothAdapter bluetoothAdapter(services.androidAutoService());
+        TouchEventForwarder touchForwarder(&androidAutoFacade, &services);
+        ConnectionStateMachine connectionStateMachine(&androidAutoFacade);
 
-    if (!audioBridge.initialize()) {
-        Logger::instance().warningContext("Main",
-                                          "Audio initialization failed, continuing without audio");
-        errorHandler.reportError(ErrorHandler::ErrorCode::AudioBackendUnavailable,
-                                 "Audio system initialization failed",
-                                 ErrorHandler::Severity::Warning);
+        PreferencesFacade preferencesFacade(&services);
+        ErrorHandler errorHandler;
+
+        if (!audioBridge.initialize()) {
+            Logger::instance().warningContext(
+                "Main", "Audio initialization failed, continuing without audio");
+            errorHandler.reportError(ErrorHandler::ErrorCode::AudioBackendUnavailable,
+                                     "Audio system initialization failed",
+                                     ErrorHandler::Severity::Warning);
+        }
+
+        QQmlApplicationEngine engine;
+
+        engine.rootContext()->setContextProperty("_serviceProvider", &services);
+        engine.rootContext()->setContextProperty("_androidAutoFacade", &androidAutoFacade);
+        engine.rootContext()->setContextProperty("_deviceManager", &deviceManager);
+        engine.rootContext()->setContextProperty("_audioBridge", &audioBridge);
+        engine.rootContext()->setContextProperty("_bluetoothService", &bluetoothAdapter);
+        engine.rootContext()->setContextProperty("_touchForwarder", &touchForwarder);
+        engine.rootContext()->setContextProperty("_connectionStateMachine", &connectionStateMachine);
+        engine.rootContext()->setContextProperty("_preferencesFacade", &preferencesFacade);
+        engine.rootContext()->setContextProperty("_errorHandler", &errorHandler);
+
+        const QUrl url(QStringLiteral("qrc:/qml/main.qml"));
+
+        QObject::connect(
+            &engine, &QQmlApplicationEngine::objectCreated, &app,
+            [url](QObject* obj, const QUrl& objUrl) {
+                if (!obj && url == objUrl) {
+                    Logger::instance().errorContext("Main", "Failed to load QML",
+                                                    {{"url", url.toString()}});
+                    QCoreApplication::exit(-1);
+                }
+            },
+            Qt::QueuedConnection);
+
+        engine.load(url);
+
+        if (engine.rootObjects().isEmpty()) {
+            Logger::instance().errorContext("Main", "No root QML objects created");
+            return -1;
+        }
+
+        Logger::instance().infoContext("Main", "Application started successfully");
+
+        exitCode = app.exec();
+
+        Logger::instance().infoContext("Main", "Shutting down", {{"exitCode", exitCode}});
     }
 
-    QQmlApplicationEngine engine;
-
-    engine.rootContext()->setContextProperty("_serviceProvider", &services);
-    engine.rootContext()->setContextProperty("_androidAutoFacade", &androidAutoFacade);
-    engine.rootContext()->setContextProperty("_deviceManager", &deviceManager);
-    engine.rootContext()->setContextProperty("_audioBridge", &audioBridge);
-    engine.rootContext()->setContextProperty("_bluetoothService", &bluetoothAdapter);
-    engine.rootContext()->setContextProperty("_touchForwarder", &touchForwarder);
-    engine.rootContext()->setContextProperty("_connectionStateMachine", &connectionStateMachine);
-    engine.rootContext()->setContextProperty("_preferencesFacade", &preferencesFacade);
-    engine.rootContext()->setContextProperty("_errorHandler", &errorHandler);
-
-    const QUrl url(QStringLiteral("qrc:/qml/main.qml"));
-
-    QObject::connect(
-        &engine, &QQmlApplicationEngine::objectCreated, &app,
-        [url](QObject* obj, const QUrl& objUrl) {
-            if (!obj && url == objUrl) {
-                Logger::instance().errorContext("Main", "Failed to load QML",
-                                                {{"url", url.toString()}});
-                QCoreApplication::exit(-1);
-            }
-        },
-        Qt::QueuedConnection);
-
-    engine.load(url);
-
-    if (engine.rootObjects().isEmpty()) {
-        Logger::instance().errorContext("Main", "No root QML objects created");
-        return -1;
-    }
-
-    Logger::instance().infoContext("Main", "Application started successfully");
-
-    int exitCode = app.exec();
-
-    Logger::instance().infoContext("Main", "Shutting down", {{"exitCode", exitCode}});
     services.shutdown();
 
     return exitCode;

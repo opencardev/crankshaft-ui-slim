@@ -14,12 +14,24 @@ import "settings" as SettingsTabs
 
 Dialog {
     id: settingsPanel
+    property int displayRotation: 0
+    readonly property bool isQuarterTurn: displayRotation === 90 || displayRotation === 270
+    readonly property int contentMargin: isQuarterTurn ? 12 : 18
+    readonly property int sectionSpacing: isQuarterTurn ? 8 : 12
+    readonly property int headerTitleSize: isQuarterTurn ? 16 : 18
+    readonly property int tabFontSize: isQuarterTurn ? 10 : 11
+    readonly property int panelInnerMargin: isQuarterTurn ? 10 : 14
     title: ""
     modal: true
     parent: Overlay.overlay
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    width: Math.min(760, parent.width * 0.96)
-    height: Math.min(460, parent.height * 0.94)
+    // Keep content proportions readable after rotating the dialog content.
+    width: isQuarterTurn
+           ? Math.min(460, parent.width * 0.94)
+           : Math.min(760, parent.width * 0.96)
+    height: isQuarterTurn
+            ? Math.min(760, parent.height * 0.96)
+            : Math.min(460, parent.height * 0.94)
     x: (parent.width - width) / 2
     y: (parent.height - height) / 2
     padding: 0
@@ -28,7 +40,7 @@ Dialog {
     standardButtons: Dialog.NoButton
 
     background: Rectangle {
-        radius: 16
+        radius: settingsPanel.isQuarterTurn ? 12 : 16
         color: settingsPanel.Material.theme === Material.Dark
                ? settingsPanel.Material.background
                : settingsPanel.Material.dialogColor
@@ -38,83 +50,130 @@ Dialog {
                               settingsPanel.Material.accent.b, 0.65)
     }
 
-    ColumnLayout {
+    Item {
+        id: rotatedViewport
         anchors.fill: parent
-        anchors.margins: 18
-        spacing: 12
+        clip: true
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+        Item {
+            id: rotatedContent
+            anchors.centerIn: parent
+            width: (settingsPanel.displayRotation === 90 || settingsPanel.displayRotation === 270)
+                   ? rotatedViewport.height
+                   : rotatedViewport.width
+            height: (settingsPanel.displayRotation === 90 || settingsPanel.displayRotation === 270)
+                    ? rotatedViewport.width
+                    : rotatedViewport.height
 
-            Label {
-                text: qsTr("Settings", "SettingsPanel")
-                font.pointSize: 18
-                font.bold: true
-                Layout.fillWidth: true
+            transform: Rotation {
+                angle: settingsPanel.displayRotation
+                origin.x: rotatedContent.width / 2
+                origin.y: rotatedContent.height / 2
             }
 
-            Label {
-                text: qsTr("Slim UI", "SettingsPanel")
-                font.pointSize: 10
-                opacity: 0.7
-            }
-        }
-
-        TabBar {
-            id: tabBar
-            Layout.fillWidth: true
-            spacing: 2
-
-            TabButton { text: qsTr("Display", "SettingsPanel") }
-            TabButton { text: qsTr("Audio", "SettingsPanel") }
-            TabButton { text: qsTr("Connection", "SettingsPanel") }
-            TabButton { text: qsTr("Bluetooth", "SettingsPanel") }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: 12
-             color: settingsPanel.Material.theme === Material.Dark
-                 ? Qt.rgba(1, 1, 1, 0.02)
-                 : Qt.rgba(0, 0, 0, 0.025)
-            border.width: 1
-             border.color: settingsPanel.Material.theme === Material.Dark
-                     ? Qt.rgba(1, 1, 1, 0.08)
-                     : Qt.rgba(0, 0, 0, 0.14)
-
-            StackLayout {
+            ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 14
-                currentIndex: tabBar.currentIndex
+                anchors.margins: settingsPanel.contentMargin
+                spacing: settingsPanel.sectionSpacing
 
-                SettingsTabs.DisplaySettingsTab {
-                    preferencesFacade: _preferencesFacade
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: settingsPanel.isQuarterTurn ? 6 : 8
+
+                    Label {
+                        text: qsTr("Settings", "SettingsPanel")
+                        font.pointSize: settingsPanel.headerTitleSize
+                        font.bold: true
+                        Layout.fillWidth: true
+                    }
+
+                    Label {
+                        text: qsTr("Slim UI", "SettingsPanel")
+                        font.pointSize: settingsPanel.isQuarterTurn ? 9 : 10
+                        opacity: 0.7
+                    }
+
+                    Button {
+                        visible: settingsPanel.isQuarterTurn
+                        text: qsTr("Close", "SettingsPanel")
+                        onClicked: settingsPanel.close()
+                    }
                 }
 
-                SettingsTabs.AudioSettingsTab {
-                    preferencesFacade: _preferencesFacade
+                TabBar {
+                    id: tabBar
+                    Layout.fillWidth: true
+                    spacing: settingsPanel.isQuarterTurn ? 1 : 2
+                    Layout.preferredHeight: settingsPanel.isQuarterTurn ? 38 : implicitHeight
+
+                    TabButton {
+                        text: qsTr("Display", "SettingsPanel")
+                        font.pointSize: settingsPanel.tabFontSize
+                        horizontalPadding: settingsPanel.isQuarterTurn ? 8 : 12
+                    }
+                    TabButton {
+                        text: qsTr("Audio", "SettingsPanel")
+                        font.pointSize: settingsPanel.tabFontSize
+                        horizontalPadding: settingsPanel.isQuarterTurn ? 8 : 12
+                    }
+                    TabButton {
+                        text: qsTr("Connection", "SettingsPanel")
+                        font.pointSize: settingsPanel.tabFontSize
+                        horizontalPadding: settingsPanel.isQuarterTurn ? 8 : 12
+                    }
+                    TabButton {
+                        text: qsTr("Bluetooth", "SettingsPanel")
+                        font.pointSize: settingsPanel.tabFontSize
+                        horizontalPadding: settingsPanel.isQuarterTurn ? 8 : 12
+                    }
                 }
 
-                SettingsTabs.ConnectionSettingsTab {
-                    preferencesFacade: _preferencesFacade
-                    onRequestFactoryReset: resetConfirmationDialog.open()
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: settingsPanel.isQuarterTurn ? 10 : 12
+                    color: settingsPanel.Material.theme === Material.Dark
+                           ? Qt.rgba(1, 1, 1, 0.02)
+                           : Qt.rgba(0, 0, 0, 0.025)
+                    border.width: 1
+                    border.color: settingsPanel.Material.theme === Material.Dark
+                                  ? Qt.rgba(1, 1, 1, 0.08)
+                                  : Qt.rgba(0, 0, 0, 0.14)
+
+                    StackLayout {
+                        anchors.fill: parent
+                        anchors.margins: settingsPanel.panelInnerMargin
+                        currentIndex: tabBar.currentIndex
+
+                        SettingsTabs.DisplaySettingsTab {
+                            preferencesFacade: _preferencesFacade
+                        }
+
+                        SettingsTabs.AudioSettingsTab {
+                            preferencesFacade: _preferencesFacade
+                        }
+
+                        SettingsTabs.ConnectionSettingsTab {
+                            preferencesFacade: _preferencesFacade
+                            onRequestFactoryReset: resetConfirmationDialog.open()
+                        }
+
+                        SettingsTabs.BluetoothSettingsTab {
+                            bluetoothService: _bluetoothService
+                        }
+                    }
                 }
 
-                SettingsTabs.BluetoothSettingsTab {
-                    bluetoothService: _bluetoothService
+                RowLayout {
+                    visible: !settingsPanel.isQuarterTurn
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: qsTr("Close", "SettingsPanel")
+                        onClicked: settingsPanel.close()
+                    }
                 }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Item { Layout.fillWidth: true }
-
-            Button {
-                text: qsTr("Close", "SettingsPanel")
-                onClicked: settingsPanel.close()
             }
         }
     }
