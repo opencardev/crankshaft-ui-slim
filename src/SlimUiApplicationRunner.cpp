@@ -25,6 +25,15 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QTimer>
+
+#ifdef Q_OS_LINUX
+#include <QByteArray>
+#include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
 
 #ifdef Q_OS_WIN
 #include <QStandardPaths>
@@ -40,6 +49,70 @@
 #include "PreferencesFacade.h"
 #include "ServiceProvider.h"
 #include "TouchEventForwarder.h"
+
+namespace {
+#ifdef Q_OS_LINUX
+auto sendSystemdNotify(const QByteArray& state) -> bool {
+    const QByteArray notifySocket = qgetenv("NOTIFY_SOCKET");
+    if (notifySocket.isEmpty()) {
+        return false;
+    }
+
+    sockaddr_un address {};
+    address.sun_family = AF_UNIX;
+
+    QByteArray socketPath = notifySocket;
+    if (socketPath.size() >= static_cast<int>(sizeof(address.sun_path))) {
+        return false;
+    }
+
+    bool isAbstractSocket = !socketPath.isEmpty() && socketPath[0] == '@';
+    if (isAbstractSocket) {
+        socketPath[0] = '\0';
+    }
+
+    ::memcpy(address.sun_path, socketPath.constData(), static_cast<size_t>(socketPath.size()));
+
+    int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        return false;
+    }
+
+    socklen_t addressLength = static_cast<socklen_t>(sizeof(address.sun_family) + socketPath.size());
+    if (!isAbstractSocket) {
+        addressLength = static_cast<socklen_t>(sizeof(address));
+    }
+
+    ssize_t sent = ::sendto(fd, state.constData(), static_cast<size_t>(state.size()), MSG_NOSIGNAL,
+                            reinterpret_cast<const sockaddr*>(&address), addressLength);
+    ::close(fd);
+
+    return sent == state.size();
+}
+
+auto watchdogIntervalMs() -> int {
+    bool ok = false;
+    quint64 watchdogUsec = qgetenv("WATCHDOG_USEC").toULongLong(&ok);
+    if (!ok || watchdogUsec == 0) {
+        return 0;
+    }
+
+    quint64 intervalMs = watchdogUsec / 2000;  // half of watchdog window
+    if (intervalMs < 1000) {
+        intervalMs = 1000;
+    }
+
+    return static_cast<int>(intervalMs);
+}
+#else
+auto sendSystemdNotify(const QByteArray& state) -> bool {
+    Q_UNUSED(state)
+    return false;
+}
+
+auto watchdogIntervalMs() -> int { return 0; }
+#endif
+}  // namespace
 
 int runSlimUiApplication(int argc, char* argv[], const QString& version) {
     QQuickStyle::setStyle("Material");
@@ -160,10 +233,27 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
             return -1;
         }
 
+        sendSystemdNotify("READY=1\nSTATUS=Running\n");
+
+        QTimer watchdogTimer;
+        const int intervalMs = watchdogIntervalMs();
+        if (intervalMs > 0) {
+            QObject::connect(&watchdogTimer, &QTimer::timeout, []() {
+                sendSystemdNotify("WATCHDOG=1\nSTATUS=Running\n");
+            });
+            watchdogTimer.start(intervalMs);
+            sendSystemdNotify("WATCHDOG=1\nSTATUS=Running\n");
+            Logger::instance().infoContext("Main",
+                                           QString("Systemd watchdog heartbeat enabled (%1ms)")
+                                               .arg(intervalMs));
+        }
+
         Logger::instance().infoContext("Main", "Application started successfully");
 
         exitCode = app.exec();
 
+        watchdogTimer.stop();
+        sendSystemdNotify("STOPPING=1\nSTATUS=Stopping\n");
         Logger::instance().infoContext("Main", "Shutting down", {{"exitCode", exitCode}});
     }
 

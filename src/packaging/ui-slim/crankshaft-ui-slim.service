@@ -23,7 +23,8 @@ Requires=crankshaft-ui-slim-display-setup.service crankshaft-core.service
 Wants=graphical.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User=crankshaft
 Group=crankshaft
 ExecStart=/usr/bin/crankshaft-ui-slim
@@ -72,7 +73,7 @@ ProtectControlGroups=true
 MemoryMax=200M
 CPUQuota=80%
 
-# Watchdog (restart if no keep-alive received within 30s)
+# Watchdog enabled: ui-slim sends READY=1 and periodic WATCHDOG=1 heartbeats.
 WatchdogSec=30
 
 [Install]
