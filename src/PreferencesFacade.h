@@ -44,6 +44,8 @@ class PreferencesFacade : public QObject {
     // Display settings
     Q_PROPERTY(int displayBrightness READ displayBrightness WRITE setDisplayBrightness NOTIFY
                    displayBrightnessChanged)
+    Q_PROPERTY(int displayRotation READ displayRotation WRITE setDisplayRotation NOTIFY
+                   displayRotationChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
 
     // Audio settings
@@ -80,6 +82,7 @@ public:
 
     // Property getters
     [[nodiscard]] auto displayBrightness() const -> int;
+    [[nodiscard]] auto displayRotation() const -> int;
     [[nodiscard]] auto audioVolume() const -> int;
     [[nodiscard]] auto connectionPreference() const -> QString;
     [[nodiscard]] auto themeMode() const -> QString;
@@ -87,6 +90,7 @@ public:
 
     // Property setters
     void setDisplayBrightness(int value);
+    void setDisplayRotation(int value);
     void setAudioVolume(int value);
     void setConnectionPreference(const QString& mode);
     auto setThemeMode(const QString& mode) -> void;
@@ -103,6 +107,7 @@ public:
 
 signals:
     void displayBrightnessChanged(int value);
+    void displayRotationChanged(int value);
     void audioVolumeChanged(int value);
     void connectionPreferenceChanged(const QString& mode);
     void themeModeChanged(const QString& mode);
@@ -137,6 +142,13 @@ private:
     auto validatePercentage(int value) const -> int;
 
     /**
+     * @brief Validate display rotation value.
+     * @param value Rotation in degrees.
+     * @return Supported rotation value or default if invalid.
+     */
+    auto validateRotation(int value) const -> int;
+
+    /**
      * @brief Detect and recover from corrupted settings.
      * @return Comma-separated list of corrupted fields recovered.
      */
@@ -145,6 +157,7 @@ private:
     // Member variables
     ServiceProvider* m_serviceProvider = nullptr;
     int m_displayBrightness = 50;                            ///< Default 50%
+    int m_displayRotation = 0;                               ///< Default 0 degrees
     int m_audioVolume = 50;                                  ///< Default 50%
     QString m_connectionPreference = QStringLiteral("USB");  ///< Default USB
     QString m_themeMode = QStringLiteral("DARK");            ///< Default dark

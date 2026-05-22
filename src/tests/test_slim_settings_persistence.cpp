@@ -40,12 +40,14 @@ private slots:
             PreferencesService service(path);
             QVERIFY(service.initialize());
             QVERIFY(service.set(QStringLiteral("slim_ui.display.brightness"), 73));
+            QVERIFY(service.set(QStringLiteral("slim_ui.display.rotation"), 90));
             QVERIFY(service.set(QStringLiteral("slim_ui.theme.mode"), QStringLiteral("LIGHT")));
         }
 
         PreferencesService reloaded(path);
         QVERIFY(reloaded.initialize());
         QCOMPARE(reloaded.get(QStringLiteral("slim_ui.display.brightness")).toInt(), 73);
+        QCOMPARE(reloaded.get(QStringLiteral("slim_ui.display.rotation")).toInt(), 90);
         QCOMPARE(reloaded.get(QStringLiteral("slim_ui.theme.mode")).toString(),
                  QStringLiteral("LIGHT"));
     }
