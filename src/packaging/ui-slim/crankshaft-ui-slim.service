@@ -77,5 +77,4 @@ CPUQuota=80%
 WatchdogSec=30
 
 [Install]
-WantedBy=multi-user.target
 WantedBy=graphical.target
