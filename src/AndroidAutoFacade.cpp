@@ -216,6 +216,10 @@ auto AndroidAutoFacade::onCoreVideoStateChanged(bool active) -> void {
 
 auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int width, int height)
     -> void {
+    if (!frameUrl.isEmpty() && m_videoInactiveDebounceTimer.isActive()) {
+        m_videoInactiveDebounceTimer.stop();
+    }
+
     if (!frameUrl.isEmpty() && !m_isVideoActive) {
         if (m_videoInactiveDebounceTimer.isActive()) {
             m_videoInactiveDebounceTimer.stop();
