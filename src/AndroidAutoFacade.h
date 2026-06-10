@@ -22,6 +22,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <QVariantMap>
 
 class ServiceProvider;
@@ -173,6 +174,7 @@ private slots:
     void onCoreAudioStateChanged(bool active);
     void onCoreProjectionReadyChanged(bool ready);
     void onCoreConnectionError(const QString& error);
+    void onVideoInactiveDebounceTimeout();
 
 private:
     auto setupEventBusConnections() -> void;
@@ -189,6 +191,7 @@ private:
     QString m_projectionFrameUrl;
     int m_projectionWidth;
     int m_projectionHeight;
+    QTimer m_videoInactiveDebounceTimer;
 };
 
 #endif  // ANDROIDAUTOFACADE_H

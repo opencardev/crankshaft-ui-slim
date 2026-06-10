@@ -30,6 +30,12 @@ class MockCoreClient : public CoreClient {
 public:
     explicit MockCoreClient(QObject* parent = nullptr) : CoreClient(parent) {}
 
+    auto emitVideoState(bool active) -> void { emit videoStateChanged(active); }
+
+    auto emitVideoFrame(const QString& frameUrl, int width = 1280, int height = 720) -> void {
+        emit videoFrameReceived(frameUrl, width, height);
+    }
+
     [[nodiscard]] auto initialize() -> bool override {
         emit connectionStateChanged(static_cast<int>(CoreClient::ConnectionState::Disconnected));
         return true;
@@ -70,15 +76,21 @@ public:
 class AndroidAutoFacadeTest : public QObject {
     Q_OBJECT
 
+    MockCoreClient* m_mockCoreClient = nullptr;
+
 private slots:
     void init() {
         auto& services = ServiceProvider::instance();
         services.shutdown();
         QVERIFY(services.initialize());
-        services.injectCoreClientForTesting(std::make_unique<MockCoreClient>());
+        m_mockCoreClient = new MockCoreClient();
+        services.injectCoreClientForTesting(std::unique_ptr<CoreClient>(m_mockCoreClient));
     }
 
-    void cleanup() { ServiceProvider::instance().shutdown(); }
+    void cleanup() {
+        ServiceProvider::instance().shutdown();
+        m_mockCoreClient = nullptr;
+    }
 
     void testDiscoveryPublishesDevices() {
         auto& services = ServiceProvider::instance();
@@ -125,6 +137,60 @@ private slots:
         QTRY_VERIFY(!errorSpy.isEmpty());
         QCOMPARE(facade.connectionState(), static_cast<int>(AndroidAutoFacade::Error));
         QVERIFY(!facade.lastError().isEmpty());
+    }
+
+    void testVideoInactiveDebounceCancelsOnQuickFrameRecovery() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+
+        QVERIFY(m_mockCoreClient != nullptr);
+
+        QSignalSpy frameSpy(&facade, &AndroidAutoFacade::projectionFrameUrlChanged);
+
+        m_mockCoreClient->emitVideoFrame(QStringLiteral("data:image/jpeg;base64,first"), 800, 480);
+        QTRY_COMPARE(facade.projectionFrameUrl(), QStringLiteral("data:image/jpeg;base64,first"));
+        QCOMPARE(facade.projectionWidth(), 800);
+        QCOMPARE(facade.projectionHeight(), 480);
+        QVERIFY(facade.isVideoActive());
+
+        m_mockCoreClient->emitVideoState(false);
+        QTest::qWait(120);
+
+        m_mockCoreClient->emitVideoFrame(QStringLiteral("data:image/jpeg;base64,second"), 800, 480);
+        QTRY_COMPARE(facade.projectionFrameUrl(), QStringLiteral("data:image/jpeg;base64,second"));
+
+        QTest::qWait(320);
+        QVERIFY(facade.isVideoActive());
+        QCOMPARE(facade.projectionFrameUrl(), QStringLiteral("data:image/jpeg;base64,second"));
+
+        bool sawEmptyFrame = false;
+        for (const auto& args : frameSpy) {
+            const QString changedUrl = args.at(0).toString();
+            if (changedUrl.isEmpty()) {
+                sawEmptyFrame = true;
+                break;
+            }
+        }
+        QVERIFY(!sawEmptyFrame);
+    }
+
+    void testVideoInactiveDebounceClearsAfterTimeout() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+
+        QVERIFY(m_mockCoreClient != nullptr);
+
+        m_mockCoreClient->emitVideoFrame(QStringLiteral("data:image/jpeg;base64,first"), 1024, 600);
+        QTRY_VERIFY(facade.isVideoActive());
+        QCOMPARE(facade.projectionFrameUrl(), QStringLiteral("data:image/jpeg;base64,first"));
+
+        m_mockCoreClient->emitVideoState(false);
+        QTest::qWait(450);
+
+        QVERIFY(!facade.isVideoActive());
+        QVERIFY(facade.projectionFrameUrl().isEmpty());
+        QCOMPARE(facade.projectionWidth(), 0);
+        QCOMPARE(facade.projectionHeight(), 0);
     }
 };
 

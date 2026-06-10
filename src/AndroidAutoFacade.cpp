@@ -40,6 +40,11 @@ AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* 
         return;
     }
 
+        m_videoInactiveDebounceTimer.setSingleShot(true);
+        m_videoInactiveDebounceTimer.setInterval(350);
+        connect(&m_videoInactiveDebounceTimer, &QTimer::timeout, this,
+            &AndroidAutoFacade::onVideoInactiveDebounceTimeout);
+
     setupEventBusConnections();
 
     Logger::instance().infoContext("AndroidAutoFacade", "Initialized successfully");
@@ -192,22 +197,37 @@ auto AndroidAutoFacade::onCoreVideoStateChanged(bool active) -> void {
         return;
     }
 
+    if (!active) {
+        if (!m_videoInactiveDebounceTimer.isActive()) {
+            m_videoInactiveDebounceTimer.start();
+        }
+        return;
+    }
+
+    if (m_videoInactiveDebounceTimer.isActive()) {
+        m_videoInactiveDebounceTimer.stop();
+    }
+
     if (m_isVideoActive != active) {
         m_isVideoActive = active;
         emit isVideoActiveChanged(m_isVideoActive);
-
-        if (!m_isVideoActive) {
-            m_projectionFrameUrl.clear();
-            m_projectionWidth = 0;
-            m_projectionHeight = 0;
-            emit projectionFrameUrlChanged(m_projectionFrameUrl);
-            emit projectionFrameChanged(m_projectionWidth, m_projectionHeight);
-        }
     }
 }
 
 auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int width, int height)
     -> void {
+    if (!frameUrl.isEmpty() && m_videoInactiveDebounceTimer.isActive()) {
+        m_videoInactiveDebounceTimer.stop();
+    }
+
+    if (!frameUrl.isEmpty() && !m_isVideoActive) {
+        if (m_videoInactiveDebounceTimer.isActive()) {
+            m_videoInactiveDebounceTimer.stop();
+        }
+        m_isVideoActive = true;
+        emit isVideoActiveChanged(m_isVideoActive);
+    }
+
     const bool frameUrlChanged = (m_projectionFrameUrl != frameUrl);
     const bool frameSizeChanged = (m_projectionWidth != width || m_projectionHeight != height);
 
@@ -221,6 +241,25 @@ auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int wi
     if (frameSizeChanged) {
         emit projectionFrameChanged(m_projectionWidth, m_projectionHeight);
     }
+}
+
+auto AndroidAutoFacade::onVideoInactiveDebounceTimeout() -> void {
+    if (m_connectionState == ConnectionState::Connected || m_isProjectionReady) {
+        return;
+    }
+
+    if (!m_isVideoActive) {
+        return;
+    }
+
+    m_isVideoActive = false;
+    emit isVideoActiveChanged(m_isVideoActive);
+
+    m_projectionFrameUrl.clear();
+    m_projectionWidth = 0;
+    m_projectionHeight = 0;
+    emit projectionFrameUrlChanged(m_projectionFrameUrl);
+    emit projectionFrameChanged(m_projectionWidth, m_projectionHeight);
 }
 
 auto AndroidAutoFacade::onCoreAudioStateChanged(bool active) -> void {
