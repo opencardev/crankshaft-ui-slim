@@ -18,6 +18,11 @@ jobs:
   quality-coverage-quick-build:
     name: Quality + Coverage + Quick Build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      base_version: ${{ steps.version.outputs.base_version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -58,6 +63,34 @@ jobs:
           QT_QPA_PLATFORM=offscreen \
           VERSION="${{ steps.version.outputs.version }}" \
           ./build.sh --clean
+
+      - name: Tag current commit with CI version
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          raw_version="${{ steps.version.outputs.version }}"
+          tag_version="${raw_version%%+*}"
+          tag_name="v${tag_version}"
+
+          existing_tag_commit="$(git rev-list -n1 "${tag_name}" 2>/dev/null || true)"
+          head_commit="$(git rev-parse HEAD)"
+
+          if [[ -n "${existing_tag_commit}" ]]; then
+            if [[ "${existing_tag_commit}" == "${head_commit}" ]]; then
+              echo "Tag ${tag_name} already points at HEAD; nothing to do."
+            else
+              echo "Tag ${tag_name} already exists on ${existing_tag_commit}; skipping to keep tags immutable."
+            fi
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag_name}" -m "CI tag ${tag_name} for ${GITHUB_SHA}"
+          git push origin "refs/tags/${tag_name}"
 
       - name: Print quick build DEB dependency metadata
         shell: bash
@@ -163,29 +196,13 @@ jobs:
       - name: Set up QEMU emulation
         uses: docker/setup-qemu-action@v4
 
-      - name: Setup GitVersion
-        uses: gittools/actions/gitversion/setup@v4
-        with:
-          versionSpec: 6.x
-
-      - name: Determine Version
-        id: gitversion
-        uses: gittools/actions/gitversion/execute@v4
-
-      - name: Export build version outputs
-        id: version
-        shell: bash
-        run: |
-          echo "base_version=${{ steps.gitversion.outputs.MajorMinorPatch }}" >> "${GITHUB_OUTPUT}"
-          echo "version=${{ steps.gitversion.outputs.SemVer }}" >> "${GITHUB_OUTPUT}"
-
       - name: Build and test in multiarch Docker container
         env:
           DISTRO_IMAGE: ${{ matrix.distro }}
           DISTRO_ID: ${{ matrix.distro_id }}
           PLATFORM: ${{ matrix.platform }}
           ARCH_ID: ${{ matrix.arch_id }}
-          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ needs.quality-coverage-quick-build.outputs.version }}
         run: |
           set -euo pipefail
           chmod +x ./build.sh
