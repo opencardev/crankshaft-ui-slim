@@ -57,6 +57,26 @@ Item {
 
             Components.SettingsCard {
                 Layout.fillWidth: true
+                title: qsTr("AA Fullscreen Delay", "SettingsPanel")
+
+                Components.SettingsSlider {
+                    Layout.fillWidth: true
+                    // 0 disables automatic fullscreen to keep current UX unchanged by default.
+                    label: qsTr("Set to 0 to disable automatic fullscreen", "SettingsPanel")
+                    from: 0
+                    to: 30
+                    valueSuffix: qsTr("s", "SettingsPanel")
+                    value: root.prefs ? root.prefs.aaProjectionFullscreenDelaySeconds : 0
+                    onUserValueChanged: (newValue) => {
+                        if (root.prefs) {
+                            root.prefs.aaProjectionFullscreenDelaySeconds = newValue
+                        }
+                    }
+                }
+            }
+
+            Components.SettingsCard {
+                Layout.fillWidth: true
                 title: qsTr("Theme", "SettingsPanel")
 
                 Components.ThemeToggle {

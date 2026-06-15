@@ -190,7 +190,7 @@ Dialog {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         Label {
-            text: qsTr("Reset all settings to factory defaults?\n\nBrightness: 50%\nVolume: 50%\nConnection: USB\nTheme: Dark", "SettingsPanel")
+            text: qsTr("Reset all settings to factory defaults?\n\nBrightness: 50%\nAA Fullscreen Delay: Disabled\nVolume: 50%\nConnection: USB\nTheme: Dark", "SettingsPanel")
             wrapMode: Text.WordWrap
         }
 

@@ -37,6 +37,8 @@ ColumnLayout {
     property int value: 50
     property int from: 0
     property int to: 100
+    // Units suffix for value label. Keep '%' default for existing sliders.
+    property string valueSuffix: "%"
     
     signal userValueChanged(int newValue)
     
@@ -66,7 +68,7 @@ ColumnLayout {
         }
         
         Label {
-            text: settingsSlider.value + "%"
+            text: settingsSlider.value + settingsSlider.valueSuffix
             font.pointSize: 11
             Layout.minimumWidth: 40
             horizontalAlignment: Text.AlignRight
