@@ -21,6 +21,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtQuick.Window
 import "components"
 
 ApplicationWindow {
@@ -31,6 +32,15 @@ ApplicationWindow {
     title: qsTr("Crankshaft Slim UI - AndroidAuto")
     property string lastShownConnectionError: ""
     property int displayRotation: 0
+    // Configurable delay before AA projection switches the app window to fullscreen.
+    // 0 means disabled.
+    property int aaProjectionFullscreenDelaySeconds: 0
+    property bool fullscreenDelayPending: false
+    property int fullscreenCountdownSeconds: 0
+    readonly property bool immersiveProjectionMode:
+        root.visibility === Window.FullScreen &&
+        navigationController.currentViewState === navigationController.viewStateAAProjection &&
+        !navigationController.settingsPanelVisible
     
     // Theme Manager - centralized theme control
     ThemeManager {
@@ -75,6 +85,10 @@ ApplicationWindow {
         function onDisplayRotationChanged(rotation) {
             root.displayRotation = rotation
         }
+        function onAaProjectionFullscreenDelaySecondsChanged(delaySeconds) {
+            root.aaProjectionFullscreenDelaySeconds = delaySeconds
+            root.updateFullscreenModeForCurrentState()
+        }
     }
     
     // Watch for errors from ErrorHandler
@@ -90,6 +104,8 @@ ApplicationWindow {
         if (_preferencesFacade) {
             theme.setTheme(_preferencesFacade.themeMode)
             displayRotation = _preferencesFacade.displayRotation
+            aaProjectionFullscreenDelaySeconds =
+                _preferencesFacade.aaProjectionFullscreenDelaySeconds
         }
 
         if (_connectionStateMachine) {
@@ -103,11 +119,13 @@ ApplicationWindow {
     function updateViewForConnectionState(state) {
         if (state === 3) { // Connected
             navigationController.showAAProjection()
+            updateFullscreenModeForCurrentState()
             return
         }
 
         if (state === 4) { // Error
             navigationController.showConnectionStatus("", "", true)
+            updateFullscreenModeForCurrentState()
             if (_connectionStateMachine && _connectionStateMachine.lastError !== "" &&
                     _connectionStateMachine.lastError !== lastShownConnectionError) {
                 lastShownConnectionError = _connectionStateMachine.lastError
@@ -118,6 +136,7 @@ ApplicationWindow {
 
         // Disconnected / Searching / Connecting
         navigationController.showConnectionStatus("", "", false)
+        updateFullscreenModeForCurrentState()
     }
 
     Connections {
@@ -160,6 +179,78 @@ ApplicationWindow {
             } else {
                 settingsPanel.close()
             }
+            // Leaving projection-only mode should always cancel pending fullscreen.
+            root.updateFullscreenModeForCurrentState()
+        }
+
+        function onCurrentViewStateChanged() {
+            root.updateFullscreenModeForCurrentState()
+        }
+    }
+
+    Timer {
+        id: delayedFullscreenTimer
+        repeat: false
+        onTriggered: {
+            root.fullscreenDelayPending = false
+            root.fullscreenCountdownSeconds = 0
+            // Final guard: only enter fullscreen if we are still on projection view.
+            if (navigationController.currentViewState === navigationController.viewStateAAProjection &&
+                    !navigationController.settingsPanelVisible) {
+                root.visibility = Window.FullScreen
+            }
+        }
+    }
+
+    Timer {
+        id: fullscreenCountdownTimer
+        interval: 1000
+        repeat: true
+        onTriggered: {
+            if (root.fullscreenCountdownSeconds > 0) {
+                root.fullscreenCountdownSeconds -= 1
+            }
+            if (root.fullscreenCountdownSeconds <= 0) {
+                stop()
+            }
+        }
+    }
+
+    function cancelDelayedFullscreen() {
+        delayedFullscreenTimer.stop()
+        fullscreenCountdownTimer.stop()
+        fullscreenDelayPending = false
+        fullscreenCountdownSeconds = 0
+    }
+
+    function scheduleDelayedFullscreen() {
+        cancelDelayedFullscreen()
+
+        if (aaProjectionFullscreenDelaySeconds <= 0) {
+            return
+        }
+
+        fullscreenDelayPending = true
+        fullscreenCountdownSeconds = aaProjectionFullscreenDelaySeconds
+        delayedFullscreenTimer.interval = aaProjectionFullscreenDelaySeconds * 1000
+        delayedFullscreenTimer.start()
+        fullscreenCountdownTimer.start()
+    }
+
+    function updateFullscreenModeForCurrentState() {
+        const isProjectionOnlyView =
+            navigationController.currentViewState === navigationController.viewStateAAProjection &&
+            !navigationController.settingsPanelVisible
+
+        if (!isProjectionOnlyView) {
+            cancelDelayedFullscreen()
+            root.visibility = Window.Windowed
+            return
+        }
+
+        // Keep fullscreen if already active, but restart the delayed transition if not.
+        if (root.visibility !== Window.FullScreen) {
+            scheduleDelayedFullscreen()
         }
     }
 
@@ -252,8 +343,10 @@ ApplicationWindow {
                 
                 // Toolbar
                 Rectangle {
+                    visible: !root.immersiveProjectionMode
                     Layout.fillWidth: true
-                    height: theme.dimensions.toolbarHeight
+                    Layout.preferredHeight: visible ? theme.dimensions.toolbarHeight : 0
+                    height: visible ? theme.dimensions.toolbarHeight : 0
                     color: theme.colors.surface
                     border.color: theme.colors.border
                     border.width: 1
@@ -265,7 +358,11 @@ ApplicationWindow {
                         
                         Text {
                             Layout.fillWidth: true
-                            text: qsTr("AndroidAuto Projection")
+                            // Reflect delayed fullscreen state directly in projection header.
+                            text: root.fullscreenDelayPending
+                                  ? qsTr("AndroidAuto Projection (fullscreen in %1s)")
+                                        .arg(root.fullscreenCountdownSeconds)
+                                  : qsTr("AndroidAuto Projection")
                             color: theme.colors.textPrimary
                             font.pixelSize: theme.typography.body1
                             font.family: theme.typography.fontFamily
@@ -463,7 +560,7 @@ ApplicationWindow {
                     Image {
                         id: projectionImage
                         anchors.fill: parent
-                        anchors.margins: theme.spacing.small
+                        anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
                         fillMode: Image.PreserveAspectFit
                         smooth: true
                         cache: false

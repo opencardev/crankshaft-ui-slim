@@ -19,6 +19,24 @@ Item {
         anchors.fill: parent
         clip: true
 
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AlwaysOn
+            width: 12
+            minimumSize: 0.2
+
+            contentItem: Rectangle {
+                implicitWidth: 8
+                radius: width / 2
+                color: Qt.rgba(0.25, 0.55, 0.95, 0.85)
+            }
+
+            background: Rectangle {
+                implicitWidth: 12
+                radius: width / 2
+                color: Qt.rgba(0.5, 0.5, 0.5, 0.18)
+            }
+        }
+
         ColumnLayout {
             width: availableWidth
             spacing: 12
@@ -50,6 +68,26 @@ Item {
                     onUserValueChanged: (newValue) => {
                         if (root.prefs) {
                             root.prefs.displayBrightness = newValue
+                        }
+                    }
+                }
+            }
+
+            Components.SettingsCard {
+                Layout.fillWidth: true
+                title: qsTr("AA Fullscreen Delay", "SettingsPanel")
+
+                Components.SettingsSlider {
+                    Layout.fillWidth: true
+                    // 0 disables automatic fullscreen to keep current UX unchanged by default.
+                    label: qsTr("Set to 0 to disable automatic fullscreen", "SettingsPanel")
+                    from: 0
+                    to: 30
+                    valueSuffix: qsTr("s", "SettingsPanel")
+                    value: root.prefs ? root.prefs.aaProjectionFullscreenDelaySeconds : 0
+                    onUserValueChanged: (newValue) => {
+                        if (root.prefs) {
+                            root.prefs.aaProjectionFullscreenDelaySeconds = newValue
                         }
                     }
                 }

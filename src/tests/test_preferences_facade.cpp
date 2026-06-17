@@ -45,6 +45,7 @@ private slots:
 
         QCOMPARE(facade.displayBrightness(), 50);
         QCOMPARE(facade.displayRotation(), 0);
+        QCOMPARE(facade.aaProjectionFullscreenDelaySeconds(), 0);
         QCOMPARE(facade.audioVolume(), 50);
         QCOMPARE(facade.connectionPreference(), QStringLiteral("USB"));
         QCOMPARE(facade.themeMode(), QStringLiteral("DARK"));
@@ -56,10 +57,12 @@ private slots:
 
         facade.setDisplayBrightness(120);
         facade.setDisplayRotation(45);
+        facade.setAaProjectionFullscreenDelaySeconds(99);
         facade.setAudioVolume(-10);
 
         QCOMPARE(facade.displayBrightness(), 100);
         QCOMPARE(facade.displayRotation(), 0);
+        QCOMPARE(facade.aaProjectionFullscreenDelaySeconds(), 30);
         QCOMPARE(facade.audioVolume(), 0);
     }
 
@@ -70,6 +73,7 @@ private slots:
             PreferencesFacade first(&services);
             first.setDisplayBrightness(77);
             first.setDisplayRotation(180);
+            first.setAaProjectionFullscreenDelaySeconds(8);
             first.setAudioVolume(63);
             first.setThemeMode(QStringLiteral("LIGHT"));
             first.saveSettings();
@@ -80,6 +84,7 @@ private slots:
 
         QCOMPARE(second.displayBrightness(), 77);
         QCOMPARE(second.displayRotation(), 180);
+        QCOMPARE(second.aaProjectionFullscreenDelaySeconds(), 8);
         QCOMPARE(second.audioVolume(), 63);
         QCOMPARE(second.themeMode(), QStringLiteral("LIGHT"));
     }
