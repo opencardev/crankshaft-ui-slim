@@ -37,6 +37,10 @@ ApplicationWindow {
     property int aaProjectionFullscreenDelaySeconds: 0
     property bool fullscreenDelayPending: false
     property int fullscreenCountdownSeconds: 0
+    readonly property bool immersiveProjectionMode:
+        root.visibility === Window.FullScreen &&
+        navigationController.currentViewState === navigationController.viewStateAAProjection &&
+        !navigationController.settingsPanelVisible
     
     // Theme Manager - centralized theme control
     ThemeManager {
@@ -339,8 +343,10 @@ ApplicationWindow {
                 
                 // Toolbar
                 Rectangle {
+                    visible: !root.immersiveProjectionMode
                     Layout.fillWidth: true
-                    height: theme.dimensions.toolbarHeight
+                    Layout.preferredHeight: visible ? theme.dimensions.toolbarHeight : 0
+                    height: visible ? theme.dimensions.toolbarHeight : 0
                     color: theme.colors.surface
                     border.color: theme.colors.border
                     border.width: 1
@@ -554,7 +560,7 @@ ApplicationWindow {
                     Image {
                         id: projectionImage
                         anchors.fill: parent
-                        anchors.margins: theme.spacing.small
+                        anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
                         fillMode: Image.PreserveAspectFit
                         smooth: true
                         cache: false

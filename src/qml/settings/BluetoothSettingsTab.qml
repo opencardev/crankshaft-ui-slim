@@ -112,7 +112,23 @@ Item {
         contentHeight: contentColumn.implicitHeight + 8
 
         ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
+            policy: ScrollBar.AlwaysOn
+            width: 12
+            minimumSize: 0.2
+
+            contentItem: Rectangle {
+                implicitWidth: 8
+                radius: width / 2
+                color: Qt.rgba(0.25, 0.55, 0.95, 0.85)
+            }
+
+            background: Rectangle {
+                implicitWidth: 12
+                radius: width / 2
+                color: root.Material.theme === Material.Dark
+                       ? Qt.rgba(1, 1, 1, 0.16)
+                       : Qt.rgba(0, 0, 0, 0.16)
+            }
         }
 
         ColumnLayout {
@@ -357,7 +373,23 @@ Item {
                         }
 
                         ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
+                            policy: ScrollBar.AlwaysOn
+                            width: 12
+                            minimumSize: 0.25
+
+                            contentItem: Rectangle {
+                                implicitWidth: 8
+                                radius: width / 2
+                                color: Qt.rgba(0.25, 0.55, 0.95, 0.85)
+                            }
+
+                            background: Rectangle {
+                                implicitWidth: 12
+                                radius: width / 2
+                                color: root.Material.theme === Material.Dark
+                                       ? Qt.rgba(1, 1, 1, 0.16)
+                                       : Qt.rgba(0, 0, 0, 0.16)
+                            }
                         }
                     }
                 }

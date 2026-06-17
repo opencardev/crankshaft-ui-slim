@@ -19,6 +19,24 @@ Item {
         anchors.fill: parent
         clip: true
 
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AlwaysOn
+            width: 12
+            minimumSize: 0.2
+
+            contentItem: Rectangle {
+                implicitWidth: 8
+                radius: width / 2
+                color: Qt.rgba(0.25, 0.55, 0.95, 0.85)
+            }
+
+            background: Rectangle {
+                implicitWidth: 12
+                radius: width / 2
+                color: Qt.rgba(0.5, 0.5, 0.5, 0.18)
+            }
+        }
+
         ColumnLayout {
             width: availableWidth
             spacing: 12
