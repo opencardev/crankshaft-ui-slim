@@ -98,6 +98,12 @@ public:
         lastTouchPoints = points;
     }
 
+    auto publish(const QString& topic, const QJsonObject& payload) -> void override {
+        ++publishCalls;
+        publishedTopics.append(topic);
+        publishedPayloads.append(payload);
+    }
+
     bool initialized{false};
     bool forceErrorOnConnect{false};
 
@@ -106,10 +112,13 @@ public:
     int connectCalls{0};
     int disconnectCalls{0};
     int sendTouchEventCalls{0};
+    int publishCalls{0};
 
     QString lastConnectedDeviceId;
     QString lastTouchEventType;
     QVariantList lastTouchPoints;
+    QList<QString> publishedTopics;
+    QList<QJsonObject> publishedPayloads;
 };
 
 class CoreMockIntegrationTest : public QObject {
@@ -164,6 +173,13 @@ private slots:
         QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Error));
         QTRY_VERIFY(machine.isRetrying());
         QVERIFY(!retrySpy.isEmpty());
+    }
+
+    void testDisplayResolutionPublishingUsesScreenAwareScaling() {
+        const QSize resolved = TouchEventForwarder::resolvePublishedDisplayResolution(
+            QSize(1280, 720), QSize(1920, 1080), 1.5);
+
+        QCOMPARE(resolved, QSize(2880, 1620));
     }
 
     void testTouchForwarderSendsEventsToMockedCoreClient() {

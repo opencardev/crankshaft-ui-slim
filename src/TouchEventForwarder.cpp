@@ -23,7 +23,9 @@
 #include "CoreClient.h"
 #include "Logger.h"
 #include "ServiceProvider.h"
+#include <QGuiApplication>
 #include <QJsonObject>
+#include <QScreen>
 
 TouchEventForwarder::TouchEventForwarder(AndroidAutoFacade* androidAutoFacade,
                                          ServiceProvider* serviceProvider, QObject* parent)
@@ -61,6 +63,17 @@ TouchEventForwarder::~TouchEventForwarder() {
 // Property getters/setters
 QSize TouchEventForwarder::displaySize() const { return m_displaySize; }
 
+QSize TouchEventForwarder::resolvePublishedDisplayResolution(const QSize& renderedSize,
+                                                              const QSize& screenSize,
+                                                              qreal devicePixelRatio) {
+    if (screenSize.isValid() && screenSize.width() > 0 && screenSize.height() > 0) {
+        const qreal ratio = qMax<qreal>(1.0, devicePixelRatio);
+        return QSize(qRound(screenSize.width() * ratio), qRound(screenSize.height() * ratio));
+    }
+
+    return renderedSize;
+}
+
 auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
     if (m_displaySize != size) {
         m_displaySize = size;
@@ -69,22 +82,33 @@ auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
         Logger::instance().infoContext(
             "TouchEventForwarder",
             QString("Display size changed to: %1x%2").arg(size.width()).arg(size.height()));
+    }
 
-        // Notify the headless core server of the new display resolution
-        // so it can configure GStreamer's videoscale to match this resolution,
-        // preventing HDMI flickering caused by resolution mismatches.
-        auto* coreClient = m_serviceProvider ? m_serviceProvider->androidAutoService() : nullptr;
-        if (coreClient) {
-            QJsonObject payload;
-            payload[QStringLiteral("width")] = size.width();
-            payload[QStringLiteral("height")] = size.height();
-            
-            Logger::instance().infoContext(
-                "TouchEventForwarder",
-                QString("Publishing display resolution to core: %1x%2")
-                    .arg(size.width()).arg(size.height()));
-            coreClient->publish(QStringLiteral("android-auto/display/resolution"), payload);
-        }
+    QSize screenSize;
+    qreal devicePixelRatio = 1.0;
+    if (const QScreen* screen = QGuiApplication::primaryScreen()) {
+        screenSize = screen->geometry().size();
+        devicePixelRatio = screen->devicePixelRatio();
+    }
+
+    const QSize publishedDisplayResolution =
+        resolvePublishedDisplayResolution(size, screenSize, devicePixelRatio);
+
+    // Notify the headless core server of the new display resolution
+    // so it can configure GStreamer's videoscale to match this resolution,
+    // preventing HDMI flickering caused by resolution mismatches.
+    auto* coreClient = m_serviceProvider ? m_serviceProvider->androidAutoService() : nullptr;
+    if (coreClient) {
+        QJsonObject payload;
+        payload[QStringLiteral("width")] = publishedDisplayResolution.width();
+        payload[QStringLiteral("height")] = publishedDisplayResolution.height();
+
+        Logger::instance().infoContext(
+            "TouchEventForwarder",
+            QString("Publishing display resolution to core: %1x%2")
+                .arg(publishedDisplayResolution.width())
+                .arg(publishedDisplayResolution.height()));
+        coreClient->publish(QStringLiteral("android-auto/display/resolution"), payload);
     }
 }
 
