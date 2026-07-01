@@ -63,6 +63,10 @@ public:
                                  ServiceProvider* serviceProvider, QObject* parent = nullptr);
     ~TouchEventForwarder() override;
 
+    static QSize resolvePublishedDisplayResolution(const QSize& renderedSize,
+                                                   const QSize& screenSize = QSize(),
+                                                   qreal devicePixelRatio = 1.0);
+
     // Property getters/setters
     [[nodiscard]] auto displaySize() const -> QSize;
     auto setDisplaySize(const QSize& size) -> void;
