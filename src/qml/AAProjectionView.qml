@@ -72,12 +72,13 @@ Item {
         touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
     }
 
-    Connections {
-        target: androidAutoFacade
-        function onProjectionFrameChanged() {
-            projectionView.updateTouchForwarderDisplaySize()
-        }
-    }
+    // updateTouchForwarderDisplaySize() is called from onPaintedWidthChanged /
+    // onPaintedHeightChanged on the projectionImage (below) which fire whenever
+    // the rendered frame size changes.  We deliberately do NOT hook
+    // onProjectionFrameChanged here: that signal fires on every decoded video
+    // frame (~30 fps) and would trigger a WebSocket publish to crankshaft-core
+    // at frame rate, causing GStreamer pipeline reconfiguration events that
+    // produce visible HDMI flicker.
 
     function mapToProjectionCoordinates(rawX, rawY) {
         var frameWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width

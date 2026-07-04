@@ -571,12 +571,13 @@ ApplicationWindow {
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
                     }
 
-                    Connections {
-                        target: _androidAutoFacade
-                        function onProjectionFrameChanged() {
-                            projectionSurface.updateTouchForwarderDisplaySize()
-                        }
-                    }
+                    // Note: onProjectionFrameChanged is intentionally NOT connected here.
+                    // That signal fires on every decoded video frame (~30 fps).  Calling
+                    // updateTouchForwarderDisplaySize() at frame rate publishes a WebSocket
+                    // 'android-auto/display/resolution' message to crankshaft-core on every
+                    // frame, which triggers GStreamer pipeline reconfiguration events that
+                    // cause visible HDMI flicker.  Genuine resize events are covered by the
+                    // onPaintedWidth/HeightChanged handlers above.
 
                     Text {
                         anchors.centerIn: parent

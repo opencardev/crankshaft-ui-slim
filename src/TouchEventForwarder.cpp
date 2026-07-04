@@ -75,7 +75,9 @@ QSize TouchEventForwarder::resolvePublishedDisplayResolution(const QSize& render
 }
 
 auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
-    if (m_displaySize != size) {
+    const bool sizeActuallyChanged = (m_displaySize != size);
+
+    if (sizeActuallyChanged) {
         m_displaySize = size;
         emit displaySizeChanged(size);
 
@@ -94,9 +96,18 @@ auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
     const QSize publishedDisplayResolution =
         resolvePublishedDisplayResolution(size, screenSize, devicePixelRatio);
 
-    // Notify the headless core server of the new display resolution
-    // so it can configure GStreamer's videoscale to match this resolution,
-    // preventing HDMI flickering caused by resolution mismatches.
+    // Only publish the display resolution to the core service when it has
+    // actually changed.  Without this guard the QML onProjectionFrameChanged
+    // signal fires on every decoded video frame (~30 fps), causing the core
+    // to receive dozens of identical setDisplayResolution() calls per second.
+    // Each call logs and re-notifies the GStreamer video decoder, triggering
+    // pipeline reconfiguration events that cause visible HDMI flicker.
+    if (publishedDisplayResolution == m_lastPublishedResolution && m_lastPublishedResolution.isValid()) {
+        return;
+    }
+
+    m_lastPublishedResolution = publishedDisplayResolution;
+
     auto* coreClient = m_serviceProvider ? m_serviceProvider->androidAutoService() : nullptr;
     if (coreClient) {
         QJsonObject payload;
