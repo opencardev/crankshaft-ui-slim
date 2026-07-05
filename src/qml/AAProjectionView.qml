@@ -105,7 +105,9 @@ Item {
         source: androidAutoFacade ? androidAutoFacade.projectionFrameUrl : ""
         smooth: true
         cache: false
-        asynchronous: true
+        // Decode each frame synchronously to avoid blanking between rapidly
+        // changing data URLs on the projection surface.
+        asynchronous: false
 
         onPaintedWidthChanged: projectionView.updateTouchForwarderDisplaySize()
         onPaintedHeightChanged: projectionView.updateTouchForwarderDisplaySize()
