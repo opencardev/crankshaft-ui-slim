@@ -565,6 +565,9 @@ ApplicationWindow {
                         smooth: true
                         cache: false
                         source: _androidAutoFacade ? _androidAutoFacade.projectionFrameUrl : ""
+                        // Keep the frame swap synchronous so the inline projection
+                        // surface does not flash between successive video frames.
+                        asynchronous: false
                         visible: source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
