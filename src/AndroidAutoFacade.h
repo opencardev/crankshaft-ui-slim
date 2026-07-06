@@ -21,6 +21,7 @@
 #define ANDROIDAUTOFACADE_H
 
 #include <QObject>
+#include <QElapsedTimer>
 #include <QString>
 #include <QTimer>
 #include <QVariantMap>
@@ -175,11 +176,13 @@ private slots:
     void onCoreProjectionReadyChanged(bool ready);
     void onCoreConnectionError(const QString& error);
     void onVideoInactiveDebounceTimeout();
+    void onProjectionFrameDispatchTimeout();
 
 private:
     auto setupEventBusConnections() -> void;
     auto updateConnectionState(int newState) -> void;
     auto reportError(const QString& errorMessage) -> void;
+    auto dispatchProjectionFrame(const QString& frameUrl, int width, int height) -> void;
 
     ServiceProvider* m_serviceProvider;
     int m_connectionState;
@@ -192,6 +195,13 @@ private:
     int m_projectionWidth;
     int m_projectionHeight;
     QTimer m_videoInactiveDebounceTimer;
+    QTimer m_projectionFrameDispatchTimer;
+    QElapsedTimer m_lastProjectionFrameDispatch;
+    QString m_pendingProjectionFrameUrl;
+    int m_pendingProjectionWidth = 0;
+    int m_pendingProjectionHeight = 0;
+    bool m_hasPendingProjectionFrame = false;
+    int m_projectionFrameIntervalMs = 33;
 };
 
 #endif  // ANDROIDAUTOFACADE_H
