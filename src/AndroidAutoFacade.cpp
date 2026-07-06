@@ -23,6 +23,10 @@
 #include "Logger.h"
 #include "ServiceProvider.h"
 
+namespace {
+constexpr int kProjectionFrameIntervalMs = 33;
+}
+
 AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* parent)
     : QObject(parent),
       m_serviceProvider(serviceProvider),
@@ -44,6 +48,11 @@ AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* 
         m_videoInactiveDebounceTimer.setInterval(350);
         connect(&m_videoInactiveDebounceTimer, &QTimer::timeout, this,
             &AndroidAutoFacade::onVideoInactiveDebounceTimeout);
+
+        m_projectionFrameIntervalMs = kProjectionFrameIntervalMs;
+        m_projectionFrameDispatchTimer.setSingleShot(true);
+        connect(&m_projectionFrameDispatchTimer, &QTimer::timeout, this,
+            &AndroidAutoFacade::onProjectionFrameDispatchTimeout);
 
     setupEventBusConnections();
 
@@ -228,6 +237,40 @@ auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int wi
         emit isVideoActiveChanged(m_isVideoActive);
     }
 
+    if (frameUrl.isEmpty()) {
+        if (m_projectionFrameDispatchTimer.isActive()) {
+            m_projectionFrameDispatchTimer.stop();
+                qMax(1, m_projectionFrameIntervalMs - static_cast<int>(elapsedMs));
+            m_projectionFrameDispatchTimer.start(remainingMs);
+        m_hasPendingProjectionFrame = false;
+        dispatchProjectionFrame(frameUrl, width, height);
+        return;
+    }
+
+    const qint64 elapsedMs =
+        m_lastProjectionFrameDispatch.isValid() ? m_lastProjectionFrameDispatch.elapsed()
+                                                : m_projectionFrameIntervalMs;
+    if (elapsedMs >= m_projectionFrameIntervalMs) {
+        dispatchProjectionFrame(frameUrl, width, height);
+        m_lastProjectionFrameDispatch.restart();
+        return;
+    }
+
+    // Keep only the newest frame while waiting for the next dispatch window.
+    m_pendingProjectionFrameUrl = frameUrl;
+    m_pendingProjectionWidth = width;
+    m_pendingProjectionHeight = height;
+    m_hasPendingProjectionFrame = true;
+
+    if (!m_projectionFrameDispatchTimer.isActive()) {
+        const int remainingMs =
+            qMax(1, m_projectionFrameIntervalMs - static_cast<int>(elapsedMs));
+        m_projectionFrameDispatchTimer.start(remainingMs);
+    }
+}
+
+auto AndroidAutoFacade::dispatchProjectionFrame(const QString& frameUrl, int width, int height)
+    -> void {
     const bool frameUrlChanged = (m_projectionFrameUrl != frameUrl);
     const bool frameSizeChanged = (m_projectionWidth != width || m_projectionHeight != height);
 
@@ -243,6 +286,18 @@ auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int wi
     }
 }
 
+auto AndroidAutoFacade::onProjectionFrameDispatchTimeout() -> void {
+    if (!m_hasPendingProjectionFrame) {
+        return;
+    }
+
+    dispatchProjectionFrame(m_pendingProjectionFrameUrl,
+                            m_pendingProjectionWidth,
+                            m_pendingProjectionHeight);
+    m_hasPendingProjectionFrame = false;
+    m_lastProjectionFrameDispatch.restart();
+}
+
 auto AndroidAutoFacade::onVideoInactiveDebounceTimeout() -> void {
     if (m_connectionState == ConnectionState::Connected || m_isProjectionReady) {
         return;
@@ -254,6 +309,11 @@ auto AndroidAutoFacade::onVideoInactiveDebounceTimeout() -> void {
 
     m_isVideoActive = false;
     emit isVideoActiveChanged(m_isVideoActive);
+
+    if (m_projectionFrameDispatchTimer.isActive()) {
+        m_projectionFrameDispatchTimer.stop();
+    }
+    m_hasPendingProjectionFrame = false;
 
     m_projectionFrameUrl.clear();
     m_projectionWidth = 0;
