@@ -240,8 +240,7 @@ auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int wi
     if (frameUrl.isEmpty()) {
         if (m_projectionFrameDispatchTimer.isActive()) {
             m_projectionFrameDispatchTimer.stop();
-                qMax(1, m_projectionFrameIntervalMs - static_cast<int>(elapsedMs));
-            m_projectionFrameDispatchTimer.start(remainingMs);
+        }
         m_hasPendingProjectionFrame = false;
         dispatchProjectionFrame(frameUrl, width, height);
         return;
