@@ -18,6 +18,7 @@
  */
 
 #include <QSignalSpy>
+#include <QMetaObject>
 #include <QtTest/QtTest>
 
 #include "AndroidAutoFacade.h"
@@ -202,6 +203,31 @@ private slots:
         QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 1);
         QCOMPARE(m_mockCoreClient->lastTouchEventType, QStringLiteral("press"));
         QVERIFY(!m_mockCoreClient->lastTouchPoints.isEmpty());
+    }
+
+    void testRepeatedVideoFramesDoNotReemitActiveState() {
+        CoreClient client;
+
+        QSignalSpy videoStateSpy(&client, &CoreClient::videoStateChanged);
+        QSignalSpy videoFrameSpy(&client, &CoreClient::videoFrameReceived);
+
+        const QString firstMessage = QStringLiteral(
+            R"({"type":"publish","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"Zmlyc3Q=","width":1280,"height":720}})"
+        );
+        const QString secondMessage = QStringLiteral(
+            R"({"type":"publish","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"c2Vjb25k","width":1280,"height":720}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, firstMessage)));
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, secondMessage)));
+
+        QCOMPARE(videoFrameSpy.count(), 2);
+        QCOMPARE(videoStateSpy.count(), 1);
+        QCOMPARE(videoStateSpy.at(0).at(0).toBool(), true);
     }
 
 private:
