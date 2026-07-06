@@ -49,7 +49,8 @@ auto QVideoSinkProjectionVideoRenderer::presentImage(const QImage& image) -> voi
         return;
     }
 
-    const int bytesPerLine = std::min(frame.bytesPerLine(0), frameImage.bytesPerLine());
+    const int imageBytesPerLine = static_cast<int>(frameImage.bytesPerLine());
+    const int bytesPerLine = std::min(frame.bytesPerLine(0), imageBytesPerLine);
     for (int y = 0; y < frameImage.height(); ++y) {
         std::memcpy(frame.bits(0) + (y * frame.bytesPerLine(0)), frameImage.constScanLine(y),
                     bytesPerLine);
