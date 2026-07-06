@@ -664,7 +664,11 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
 
                 const QString frameUrl = QStringLiteral("data:image/jpeg;base64,%1").arg(encodedData);
                 emit videoFrameReceived(frameUrl, width, height);
-                emit videoStateChanged(true);
+
+                if (!m_videoReady) {
+                    m_videoReady = true;
+                    emit videoStateChanged(true);
+                }
             }
         } else if (topic.startsWith(QStringLiteral("bluetooth/"))) {
             emit bluetoothEventReceived(topic, payload.toVariantMap());
