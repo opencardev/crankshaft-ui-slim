@@ -21,10 +21,16 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 #include <memory>
 
 class AndroidAutoWebRtcSession;
-class ProjectionVideoRenderer;
+#include "ProjectionVideoRenderer.h"
+
+struct _GstPromise;
+struct _GstElement;
+struct _GstPad;
+struct _GstSample;
 
 class AndroidAutoWebRtcReceiver : public QObject {
     Q_OBJECT
@@ -60,19 +66,19 @@ private:
     auto ensurePipeline() -> bool;
     void teardownPipeline();
 
-    static void onNegotiationAnswerCreated(struct _GstPromise* promise, gpointer userData);
+    static void onNegotiationAnswerCreated(struct _GstPromise* promise, void* userData);
     static void onIncomingPadAdded(struct _GstElement* element, struct _GstPad* pad,
-                                   gpointer userData);
+                                   void* userData);
     static void onDecodebinPadAdded(struct _GstElement* element, struct _GstPad* pad,
-                                    gpointer userData);
-    static GstFlowReturn onNewSample(struct _GstAppSink* sink, gpointer userData);
-    static void onLocalIceCandidate(struct _GstElement* element, guint mlineIndex, gchar* candidate,
-                                    gpointer userData);
+                                    void* userData);
+    static int onNewSample(void* sink, void* userData);
+    static void onLocalIceCandidate(struct _GstElement* element, unsigned int mlineIndex,
+                                    char* candidate, void* userData);
 
     void handleAnswerCreated(struct _GstPromise* promise);
     void handleIncomingPad(struct _GstPad* pad);
     void handleDecodebinPad(struct _GstPad* pad);
-    auto pushSampleToRenderer(struct _GstSample* sample) -> GstFlowReturn;
+    auto pushSampleToRenderer(struct _GstSample* sample) -> int;
 
     AndroidAutoWebRtcSession* m_session{nullptr};
     std::unique_ptr<ProjectionVideoRenderer> m_renderer;

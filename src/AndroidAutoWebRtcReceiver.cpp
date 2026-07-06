@@ -256,7 +256,7 @@ void AndroidAutoWebRtcReceiver::teardownPipeline() {
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(GstPromise* promise, gpointer userData) {
+void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(GstPromise* promise, void* userData) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
     self->handleAnswerCreated(promise);
@@ -267,7 +267,7 @@ void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(GstPromise* promise, 
 }
 
 void AndroidAutoWebRtcReceiver::onIncomingPadAdded(GstElement* element, GstPad* pad,
-                                                   gpointer userData) {
+                                                   void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
@@ -279,7 +279,7 @@ void AndroidAutoWebRtcReceiver::onIncomingPadAdded(GstElement* element, GstPad* 
 }
 
 void AndroidAutoWebRtcReceiver::onDecodebinPadAdded(GstElement* element, GstPad* pad,
-                                                    gpointer userData) {
+                                                    void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
@@ -290,14 +290,15 @@ void AndroidAutoWebRtcReceiver::onDecodebinPadAdded(GstElement* element, GstPad*
 #endif
 }
 
-GstFlowReturn AndroidAutoWebRtcReceiver::onNewSample(GstAppSink* sink, gpointer userData) {
+int AndroidAutoWebRtcReceiver::onNewSample(void* sink, void* userData) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
+    auto* appSink = static_cast<GstAppSink*>(sink);
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
-    GstSample* sample = gst_app_sink_pull_sample(sink);
+    GstSample* sample = gst_app_sink_pull_sample(appSink);
     if (!sample) {
         return GST_FLOW_ERROR;
     }
-    const GstFlowReturn result = self->pushSampleToRenderer(sample);
+    const int result = self->pushSampleToRenderer(sample);
     gst_sample_unref(sample);
     return result;
 #else
@@ -307,8 +308,8 @@ GstFlowReturn AndroidAutoWebRtcReceiver::onNewSample(GstAppSink* sink, gpointer 
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onLocalIceCandidate(GstElement* element, guint mlineIndex,
-                                                    gchar* candidate, gpointer userData) {
+void AndroidAutoWebRtcReceiver::onLocalIceCandidate(GstElement* element, unsigned int mlineIndex,
+                                                    char* candidate, void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
