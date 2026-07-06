@@ -212,10 +212,10 @@ private slots:
         QSignalSpy videoFrameSpy(&client, &CoreClient::videoFrameReceived);
 
         const QString firstMessage = QStringLiteral(
-            R"({"type":"publish","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"Zmlyc3Q=","width":1280,"height":720}})"
+            R"({"type":"event","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"Zmlyc3Q=","width":1280,"height":720}})"
         );
         const QString secondMessage = QStringLiteral(
-            R"({"type":"publish","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"c2Vjb25k","width":1280,"height":720}})"
+            R"({"type":"event","topic":"android-auto/media/video-frame","payload":{"encoding":"jpeg-base64","data":"c2Vjb25k","width":1280,"height":720}})"
         );
 
         QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
