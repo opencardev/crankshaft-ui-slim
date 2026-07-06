@@ -21,6 +21,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtMultimedia
 import QtQuick.Window
 import "components"
 
@@ -404,14 +405,19 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: theme.colors.background
+                    readonly property bool webRtcActive: _androidAutoFacade && _androidAutoFacade.videoTransportMode === "webrtc" && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active
 
                     function updateTouchForwarderDisplaySize() {
                         if (!_touchForwarder) {
                             return
                         }
 
-                        var mappedWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width
-                        var mappedHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height
+                        var mappedWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
+                            ? projectionVideoOutput.contentRect.width
+                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
+                        var mappedHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
+                            ? projectionVideoOutput.contentRect.height
+                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
                         _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
                         var aaWidth = _androidAutoFacade && _androidAutoFacade.projectionWidth > 0
@@ -424,15 +430,23 @@ ApplicationWindow {
                     }
 
                     function mapToProjectionCoordinates(rawX, rawY) {
-                        var frameWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width
-                        var frameHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height
+                        var frameWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
+                            ? projectionVideoOutput.contentRect.width
+                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
+                        var frameHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
+                            ? projectionVideoOutput.contentRect.height
+                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
 
                         if (frameWidth <= 0 || frameHeight <= 0) {
                             return { x: 0, y: 0 }
                         }
 
-                        var frameLeft = (projectionImage.width - frameWidth) / 2
-                        var frameTop = (projectionImage.height - frameHeight) / 2
+                        var frameLeft = webRtcActive && projectionVideoOutput.contentRect.width > 0
+                            ? projectionVideoOutput.contentRect.x
+                            : (projectionImage.width - frameWidth) / 2
+                        var frameTop = webRtcActive && projectionVideoOutput.contentRect.height > 0
+                            ? projectionVideoOutput.contentRect.y
+                            : (projectionImage.height - frameHeight) / 2
 
                         var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
                         var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
@@ -557,6 +571,17 @@ ApplicationWindow {
                         }
                     }
                     
+                    VideoOutput {
+                        id: projectionVideoOutput
+                        anchors.fill: parent
+                        anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
+                        fillMode: VideoOutput.PreserveAspectFit
+                        videoSink: _androidAutoWebRtcReceiver ? _androidAutoWebRtcReceiver.videoSinkObject : null
+                        visible: projectionSurface.webRtcActive
+
+                        onContentRectChanged: projectionSurface.updateTouchForwarderDisplaySize()
+                    }
+
                     Image {
                         id: projectionImage
                         anchors.fill: parent
@@ -568,7 +593,7 @@ ApplicationWindow {
                         // Keep the frame swap synchronous so the inline projection
                         // surface does not flash between successive video frames.
                         asynchronous: false
-                        visible: source !== ""
+                        visible: !projectionSurface.webRtcActive && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
@@ -589,12 +614,13 @@ ApplicationWindow {
                         font.pixelSize: theme.typography.h4
                         font.family: theme.typography.fontFamily
                         horizontalAlignment: Text.AlignHCenter
-                        visible: !projectionImage.visible
+                        visible: (!projectionSurface.webRtcActive && !projectionImage.visible) ||
+                                 (projectionSurface.webRtcActive && projectionVideoOutput.contentRect.width <= 0)
                     }
 
                     MultiPointTouchArea {
                         id: projectionTouchArea
-                        anchors.fill: projectionImage
+                        anchors.fill: parent
                         minimumTouchPoints: 1
                         maximumTouchPoints: 10
 
@@ -627,7 +653,7 @@ ApplicationWindow {
                     }
 
                     MouseArea {
-                        anchors.fill: projectionImage
+                        anchors.fill: parent
                         enabled: !projectionTouchArea.enabled
 
                         property bool isPressed: false

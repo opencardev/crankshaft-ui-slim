@@ -22,6 +22,7 @@
 #include <QtTest/QtTest>
 
 #include "AndroidAutoFacade.h"
+#include "AndroidAutoWebRtcSession.h"
 #include "ConnectionStateMachine.h"
 #include "CoreClient.h"
 #include "ServiceProvider.h"
@@ -103,6 +104,14 @@ public:
         ++publishCalls;
         publishedTopics.append(topic);
         publishedPayloads.append(payload);
+    }
+
+    auto emitVideoTransportMode(const QString& mode) -> void {
+        emit videoTransportModeChanged(mode);
+    }
+
+    auto emitWebRtcSignaling(const QString& topic, const QVariantMap& payload) -> void {
+        emit webRtcSignalingReceived(topic, payload);
     }
 
     bool initialized{false};
@@ -228,6 +237,70 @@ private slots:
         QCOMPARE(videoFrameSpy.count(), 2);
         QCOMPARE(videoStateSpy.count(), 1);
         QCOMPARE(videoStateSpy.at(0).at(0).toBool(), true);
+    }
+
+    void testWebRtcEventsAndTransportModeAreExposed() {
+        CoreClient client;
+
+        QSignalSpy transportModeSpy(&client, &CoreClient::videoTransportModeChanged);
+        QSignalSpy webRtcSpy(&client, &CoreClient::webRtcSignalingReceived);
+
+        const QString channelStatusMessage = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":false,"media_audio_ready":false,"video_transport_mode":"webrtc","reason":"webrtc_initialized"}})"
+        );
+        const QString offerMessage = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/webrtc/offer","payload":{"type":"offer","sdp":"v=0"}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, channelStatusMessage)));
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, offerMessage)));
+
+        QCOMPARE(transportModeSpy.count(), 1);
+        QCOMPARE(transportModeSpy.at(0).at(0).toString(), QStringLiteral("webrtc"));
+
+        QCOMPARE(webRtcSpy.count(), 1);
+        QCOMPARE(webRtcSpy.at(0).at(0).toString(), QStringLiteral("android-auto/webrtc/offer"));
+        QCOMPARE(webRtcSpy.at(0).at(1).toMap().value(QStringLiteral("type")).toString(),
+                 QStringLiteral("offer"));
+    }
+
+    void testWebRtcSessionTracksOfferAndPublishesAnswer() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        AndroidAutoWebRtcSession session(&facade);
+
+        QSignalSpy activeSpy(&session, &AndroidAutoWebRtcSession::activeChanged);
+        QSignalSpy offerSpy(&session, &AndroidAutoWebRtcSession::remoteOfferReceived);
+
+        m_mockCoreClient->emitVideoTransportMode(QStringLiteral("webrtc"));
+        QTRY_VERIFY(session.active());
+        QVERIFY(!activeSpy.isEmpty());
+
+        const QVariantMap offerPayload{{QStringLiteral("type"), QStringLiteral("offer")},
+                                       {QStringLiteral("sdp"), QStringLiteral("v=0")}};
+        m_mockCoreClient->emitWebRtcSignaling(QStringLiteral("android-auto/webrtc/offer"),
+                                              offerPayload);
+
+        QTRY_COMPARE(session.remoteOfferSdp(), QStringLiteral("v=0"));
+        QCOMPARE(session.signalingState(), QStringLiteral("have-remote-offer"));
+        QVERIFY(!offerSpy.isEmpty());
+
+        session.sendAnswer(QStringLiteral("v=0\r\no=ui-slim-answer"));
+        QTRY_COMPARE(m_mockCoreClient->publishCalls, 1);
+        QCOMPARE(m_mockCoreClient->publishedTopics.last(), QStringLiteral("android-auto/webrtc/answer"));
+        QCOMPARE(m_mockCoreClient->publishedPayloads.last().value(QStringLiteral("type")).toString(),
+                 QStringLiteral("answer"));
+        QCOMPARE(session.signalingState(), QStringLiteral("local-answer-sent"));
+
+        session.sendIceCandidate(QStringLiteral("candidate:1 1 UDP 1 127.0.0.1 9 typ host"), 0,
+                                 QStringLiteral("video"));
+        QTRY_COMPARE(m_mockCoreClient->publishCalls, 2);
+        QCOMPARE(m_mockCoreClient->publishedTopics.last(),
+                 QStringLiteral("android-auto/webrtc/ice-candidate"));
     }
 
 private:

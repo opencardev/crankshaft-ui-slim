@@ -19,6 +19,9 @@
 
 #include "SlimUiApplicationRunner.h"
 
+#include "AndroidAutoWebRtcReceiver.h"
+#include "AndroidAutoWebRtcSession.h"
+
 #include <QCommandLineParser>
 #include <QDir>
 #include <QGuiApplication>
@@ -184,6 +187,8 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
 
     {
         AndroidAutoFacade androidAutoFacade(&services);
+        AndroidAutoWebRtcSession androidAutoWebRtcSession(&androidAutoFacade);
+        AndroidAutoWebRtcReceiver androidAutoWebRtcReceiver(&androidAutoWebRtcSession);
         DeviceManager deviceManager(&services, &androidAutoFacade);
         AudioBridge audioBridge(&services);
         BluetoothAdapter bluetoothAdapter(services.androidAutoService());
@@ -205,6 +210,8 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
 
         engine.rootContext()->setContextProperty("_serviceProvider", &services);
         engine.rootContext()->setContextProperty("_androidAutoFacade", &androidAutoFacade);
+        engine.rootContext()->setContextProperty("_androidAutoWebRtcSession", &androidAutoWebRtcSession);
+        engine.rootContext()->setContextProperty("_androidAutoWebRtcReceiver", &androidAutoWebRtcReceiver);
         engine.rootContext()->setContextProperty("_deviceManager", &deviceManager);
         engine.rootContext()->setContextProperty("_audioBridge", &audioBridge);
         engine.rootContext()->setContextProperty("_bluetoothService", &bluetoothAdapter);

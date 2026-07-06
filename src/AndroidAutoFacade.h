@@ -71,6 +71,11 @@ class AndroidAutoFacade : public QObject {
     Q_PROPERTY(QString projectionFrameUrl READ projectionFrameUrl NOTIFY projectionFrameUrlChanged)
 
     /**
+     * @brief Active core-reported video transport mode
+     */
+    Q_PROPERTY(QString videoTransportMode READ videoTransportMode NOTIFY videoTransportModeChanged)
+
+    /**
      * @brief Width of latest projection frame
      */
     Q_PROPERTY(int projectionWidth READ projectionWidth NOTIFY projectionFrameChanged)
@@ -101,6 +106,7 @@ public:
     [[nodiscard]] auto isAudioActive() const -> bool;
     [[nodiscard]] auto isProjectionReady() const -> bool;
     [[nodiscard]] auto projectionFrameUrl() const -> QString;
+    [[nodiscard]] auto videoTransportMode() const -> QString;
     [[nodiscard]] auto projectionWidth() const -> int;
     [[nodiscard]] auto projectionHeight() const -> int;
 
@@ -136,6 +142,11 @@ public:
     Q_INVOKABLE void disconnectDevice();
 
     /**
+     * @brief Send a WebRTC signaling message back to core over the websocket control plane
+     */
+    Q_INVOKABLE void sendWebRtcSignalingMessage(const QString& topic, const QVariantMap& payload);
+
+    /**
      * @brief Retry connection to previously connected device
      * Implements exponential backoff with maximum retry attempts.
      */
@@ -154,6 +165,8 @@ signals:
     void isProjectionReadyChanged(bool ready);
     void projectionFrameUrlChanged(const QString& frameUrl);
     void projectionFrameChanged(int width, int height);
+    void videoTransportModeChanged(const QString& mode);
+    void webRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
 
     // Discovery events
     void devicesDetected(const QVariantList& devices);
@@ -172,6 +185,8 @@ private slots:
     void onCoreDeviceRemoved(const QString& deviceId);
     void onCoreVideoStateChanged(bool active);
     void onCoreVideoFrameReceived(const QString& frameUrl, int width, int height);
+    void onCoreVideoTransportModeChanged(const QString& mode);
+    void onCoreWebRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void onCoreAudioStateChanged(bool active);
     void onCoreProjectionReadyChanged(bool ready);
     void onCoreConnectionError(const QString& error);
@@ -192,6 +207,7 @@ private:
     bool m_isAudioActive;
     bool m_isProjectionReady;
     QString m_projectionFrameUrl;
+    QString m_videoTransportMode;
     int m_projectionWidth;
     int m_projectionHeight;
     QTimer m_videoInactiveDebounceTimer;
