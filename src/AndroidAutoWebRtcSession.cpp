@@ -30,7 +30,8 @@ constexpr auto kStateRemoteIceCandidateReceived = "remote-ice-candidate-received
 
 AndroidAutoWebRtcSession::AndroidAutoWebRtcSession(AndroidAutoFacade* androidAutoFacade,
                                                    QObject* parent)
-    : QObject(parent), m_androidAutoFacade(androidAutoFacade), m_signalingState(QStringLiteral(kStateIdle)) {
+        : QObject(parent), m_androidAutoFacade(androidAutoFacade),
+            m_signalingState(QString::fromLatin1(kStateIdle)) {
     if (!m_androidAutoFacade) {
         setLastError(QStringLiteral("AndroidAutoFacade is required for WebRTC session"));
         return;
@@ -69,7 +70,7 @@ void AndroidAutoWebRtcSession::sendAnswer(const QString& sdp) {
         QStringLiteral("android-auto/webrtc/answer"),
         QVariantMap{{QStringLiteral("type"), QStringLiteral("answer")},
                     {QStringLiteral("sdp"), sdp}});
-    setSignalingState(QStringLiteral(kStateLocalAnswerSent));
+    setSignalingState(QString::fromLatin1(kStateLocalAnswerSent));
 }
 
 void AndroidAutoWebRtcSession::sendIceCandidate(const QString& candidate, int sdpMLineIndex,
@@ -98,7 +99,7 @@ void AndroidAutoWebRtcSession::resetSession() {
     if (hadOffer) {
         emit remoteOfferSdpChanged(m_remoteOfferSdp);
     }
-    setSignalingState(QStringLiteral(kStateIdle));
+    setSignalingState(QString::fromLatin1(kStateIdle));
     setLastError(QString());
 }
 
@@ -119,13 +120,13 @@ void AndroidAutoWebRtcSession::onWebRtcSignalingReceived(const QString& topic,
             m_remoteOfferSdp = sdp;
             emit remoteOfferSdpChanged(m_remoteOfferSdp);
         }
-        setSignalingState(QStringLiteral(kStateHaveRemoteOffer));
+        setSignalingState(QString::fromLatin1(kStateHaveRemoteOffer));
         emit remoteOfferReceived(sdp, payload);
         return;
     }
 
     if (topic == QStringLiteral("android-auto/webrtc/ice-candidate")) {
-        setSignalingState(QStringLiteral(kStateRemoteIceCandidateReceived));
+        setSignalingState(QString::fromLatin1(kStateRemoteIceCandidateReceived));
         emit remoteIceCandidateReceived(payload);
     }
 }

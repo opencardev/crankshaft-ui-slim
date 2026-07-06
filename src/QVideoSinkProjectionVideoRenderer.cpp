@@ -19,7 +19,11 @@
 
 #include "QVideoSinkProjectionVideoRenderer.h"
 
+#include <QVideoFrameFormat>
 #include <QVideoFrame>
+
+#include <algorithm>
+#include <cstring>
 
 QVideoSinkProjectionVideoRenderer::QVideoSinkProjectionVideoRenderer(QObject* parent)
     : ProjectionVideoRenderer(parent), m_videoSink(new QVideoSink(this)) {}
@@ -34,7 +38,25 @@ auto QVideoSinkProjectionVideoRenderer::presentImage(const QImage& image) -> voi
         return;
     }
 
-    m_videoSink->setVideoFrame(QVideoFrame(image));
+    const QImage frameImage = image.format() == QImage::Format_RGBA8888
+        ? image
+        : image.convertToFormat(QImage::Format_RGBA8888);
+
+    QVideoFrameFormat format(frameImage.size(), QVideoFrameFormat::Format_RGBA8888);
+    QVideoFrame frame(format);
+    if (!frame.isValid() || !frame.map(QVideoFrame::WriteOnly)) {
+        clear();
+        return;
+    }
+
+    const int bytesPerLine = std::min(frame.bytesPerLine(0), frameImage.bytesPerLine());
+    for (int y = 0; y < frameImage.height(); ++y) {
+        std::memcpy(frame.bits(0) + (y * frame.bytesPerLine(0)), frameImage.constScanLine(y),
+                    bytesPerLine);
+    }
+    frame.unmap();
+
+    m_videoSink->setVideoFrame(frame);
 }
 
 auto QVideoSinkProjectionVideoRenderer::clear() -> void {

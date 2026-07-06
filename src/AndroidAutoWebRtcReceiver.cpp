@@ -419,7 +419,7 @@ void AndroidAutoWebRtcReceiver::handleDecodebinPad(GstPad* pad) {
 #endif
 }
 
-auto AndroidAutoWebRtcReceiver::pushSampleToRenderer(GstSample* sample) -> GstFlowReturn {
+auto AndroidAutoWebRtcReceiver::pushSampleToRenderer(GstSample* sample) -> int {
 #if !CRANKSHAFT_UI_GSTREAMER_WEBRTC
     Q_UNUSED(sample)
     return GST_FLOW_ERROR;
