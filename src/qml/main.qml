@@ -21,7 +21,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
-import QtMultimedia
 import QtQuick.Window
 import "components"
 
@@ -407,16 +406,24 @@ ApplicationWindow {
                     color: theme.colors.background
                     readonly property bool webRtcActive: _androidAutoFacade && _androidAutoFacade.videoTransportMode === "webrtc" && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active
 
+                    function videoContentRect() {
+                        if (projectionVideoLoader.item && projectionVideoLoader.item.contentRect) {
+                            return projectionVideoLoader.item.contentRect
+                        }
+                        return Qt.rect(0, 0, 0, 0)
+                    }
+
                     function updateTouchForwarderDisplaySize() {
                         if (!_touchForwarder) {
                             return
                         }
 
-                        var mappedWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
-                            ? projectionVideoOutput.contentRect.width
+                        var videoRect = videoContentRect()
+                        var mappedWidth = webRtcActive && videoRect.width > 0
+                            ? videoRect.width
                             : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var mappedHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
-                            ? projectionVideoOutput.contentRect.height
+                        var mappedHeight = webRtcActive && videoRect.height > 0
+                            ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
                         _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
@@ -430,22 +437,23 @@ ApplicationWindow {
                     }
 
                     function mapToProjectionCoordinates(rawX, rawY) {
-                        var frameWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
-                            ? projectionVideoOutput.contentRect.width
+                        var videoRect = videoContentRect()
+                        var frameWidth = webRtcActive && videoRect.width > 0
+                            ? videoRect.width
                             : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var frameHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
-                            ? projectionVideoOutput.contentRect.height
+                        var frameHeight = webRtcActive && videoRect.height > 0
+                            ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
 
                         if (frameWidth <= 0 || frameHeight <= 0) {
                             return { x: 0, y: 0 }
                         }
 
-                        var frameLeft = webRtcActive && projectionVideoOutput.contentRect.width > 0
-                            ? projectionVideoOutput.contentRect.x
+                        var frameLeft = webRtcActive && videoRect.width > 0
+                            ? videoRect.x
                             : (projectionImage.width - frameWidth) / 2
-                        var frameTop = webRtcActive && projectionVideoOutput.contentRect.height > 0
-                            ? projectionVideoOutput.contentRect.y
+                        var frameTop = webRtcActive && videoRect.height > 0
+                            ? videoRect.y
                             : (projectionImage.height - frameHeight) / 2
 
                         var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
@@ -571,15 +579,31 @@ ApplicationWindow {
                         }
                     }
                     
-                    VideoOutput {
-                        id: projectionVideoOutput
+                    Loader {
+                        id: projectionVideoLoader
                         anchors.fill: parent
                         anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
-                        fillMode: VideoOutput.PreserveAspectFit
-                        videoSink: _androidAutoWebRtcReceiver ? _androidAutoWebRtcReceiver.videoSinkObject : null
-                        visible: projectionSurface.webRtcActive
+                        active: projectionSurface.webRtcActive
+                        source: "qrc:/qml/components/WebRtcVideoOutput.qml"
 
-                        onContentRectChanged: projectionSurface.updateTouchForwarderDisplaySize()
+                        onLoaded: {
+                            if (item) {
+                                item.sinkObject = _androidAutoWebRtcReceiver ? _androidAutoWebRtcReceiver.videoSinkObject : null
+                                projectionSurface.updateTouchForwarderDisplaySize()
+                            }
+                        }
+
+                        onItemChanged: {
+                            projectionSurface.updateTouchForwarderDisplaySize()
+                        }
+                    }
+
+                    Connections {
+                        target: projectionVideoLoader.item
+                        ignoreUnknownSignals: true
+                        function onContentRectChanged() {
+                            projectionSurface.updateTouchForwarderDisplaySize()
+                        }
                     }
 
                     Image {
@@ -615,7 +639,7 @@ ApplicationWindow {
                         font.family: theme.typography.fontFamily
                         horizontalAlignment: Text.AlignHCenter
                         visible: (!projectionSurface.webRtcActive && !projectionImage.visible) ||
-                                 (projectionSurface.webRtcActive && projectionVideoOutput.contentRect.width <= 0)
+                                 (projectionSurface.webRtcActive && projectionSurface.videoContentRect().width <= 0)
                     }
 
                     MultiPointTouchArea {
