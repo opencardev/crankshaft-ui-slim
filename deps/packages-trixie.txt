@@ -17,5 +17,8 @@ qt6-tools-dev
 qt6-tools-dev-tools
 qt6-l10n-tools
 libqt6sql6-sqlite
+libgstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev
+libgstreamer-plugins-bad1.0-dev
 libdbus-1-dev
 file
