@@ -59,6 +59,10 @@ function(add_slim_ui_test test_name)
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${test_name} PRIVATE -Wno-psabi)
+    endif()
+
     add_test(
         NAME ${test_name}
         COMMAND ${test_name}
