@@ -212,6 +212,7 @@ qt_add_resources(crankshaft-ui-slim "qml"
         qml/components/FactoryResetButton.qml
         qml/components/SettingsCard.qml
         qml/components/IconFontManager.qml
+        qml/components/WebRtcVideoOutput.qml
         qml/settings/DisplaySettingsTab.qml
         qml/settings/AudioSettingsTab.qml
         qml/settings/ConnectionSettingsTab.qml
