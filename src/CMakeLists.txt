@@ -147,6 +147,12 @@ qt_add_executable(crankshaft-ui-slim
 )
 target_compile_definitions(crankshaft-ui-slim PRIVATE CRANKSHAFT_AASDK_OLD_API)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC can emit noisy psABI compatibility notes when Qt containers instantiate
+    # std::map internals with QString keys. These are toolchain notes, not defects.
+    target_compile_options(crankshaft-ui-slim PRIVATE -Wno-psabi)
+endif()
+
 # Set runtime output directory
 set_target_properties(crankshaft-ui-slim PROPERTIES
     AUTOMOC ON
@@ -183,7 +189,10 @@ target_include_directories(crankshaft-ui-slim PRIVATE
 )
 
 if(GSTREAMER_FOUND AND GSTREAMER_APP_FOUND AND GSTREAMER_VIDEO_FOUND AND GSTREAMER_WEBRTC_FOUND AND GSTREAMER_SDP_FOUND)
-    target_compile_definitions(crankshaft-ui-slim PRIVATE CRANKSHAFT_UI_GSTREAMER_WEBRTC=1)
+    target_compile_definitions(crankshaft-ui-slim PRIVATE
+        CRANKSHAFT_UI_GSTREAMER_WEBRTC=1
+        GST_USE_UNSTABLE_API
+    )
 else()
     target_compile_definitions(crankshaft-ui-slim PRIVATE CRANKSHAFT_UI_GSTREAMER_WEBRTC=0)
 endif()
