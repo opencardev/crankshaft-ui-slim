@@ -26,6 +26,10 @@ set(SLIM_UI_TEST_COMMON_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../PreferencesService.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../ServiceProvider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoFacade.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoWebRtcSession.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ProjectionVideoRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../QVideoSinkProjectionVideoRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoWebRtcReceiver.cpp
 )
 
 function(add_slim_ui_test test_name)

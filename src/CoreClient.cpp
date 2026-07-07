@@ -243,13 +243,18 @@ auto CoreClient::subscribeToTopics() -> void {
     mediaSubscription["topic"] = "android-auto/media/*";
     m_webSocket->sendTextMessage(QJsonDocument(mediaSubscription).toJson(QJsonDocument::Compact));
 
+    QJsonObject webRtcSubscription;
+    webRtcSubscription["type"] = "subscribe";
+    webRtcSubscription["topic"] = "android-auto/webrtc/*";
+    m_webSocket->sendTextMessage(QJsonDocument(webRtcSubscription).toJson(QJsonDocument::Compact));
+
     QJsonObject btSubscription;
     btSubscription["type"] = "subscribe";
     btSubscription["topic"] = "bluetooth/#";
     m_webSocket->sendTextMessage(QJsonDocument(btSubscription).toJson(QJsonDocument::Compact));
 
     Logger::instance().infoContext("CoreClient",
-                                   "Subscribed to android-auto/status/*, android-auto/media/*, bluetooth/#");
+                                   "Subscribed to android-auto/status/*, android-auto/media/*, android-auto/webrtc/*, bluetooth/#");
 }
 
 auto CoreClient::publish(const QString& topic, const QJsonObject& payload) -> void {
@@ -432,6 +437,10 @@ void CoreClient::onWebSocketDisconnected() {
     m_projectionReady = false;
     m_videoReady = false;
     m_audioReady = false;
+    if (!m_videoTransportMode.isEmpty()) {
+        m_videoTransportMode.clear();
+        emit videoTransportModeChanged(m_videoTransportMode);
+    }
     emit projectionReadyChanged(false);
     emit videoStateChanged(false);
     emit audioStateChanged(false);
@@ -456,6 +465,10 @@ void CoreClient::onWebSocketError(QAbstractSocket::SocketError error) {
     m_projectionReady = false;
     m_videoReady = false;
     m_audioReady = false;
+    if (!m_videoTransportMode.isEmpty()) {
+        m_videoTransportMode.clear();
+        emit videoTransportModeChanged(m_videoTransportMode);
+    }
     emit projectionReadyChanged(false);
     emit videoStateChanged(false);
     emit audioStateChanged(false);
@@ -587,20 +600,27 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const bool serviceDiscoveryCompleted = payload.value("service_discovery_completed").toBool(false);
             const QString connectionStateName = payload.value("connection_state_name").toString();
             const QString reason = payload.value("reason").toString();
+            const QString newVideoTransportMode = payload.value("video_transport_mode").toString();
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
 
             Logger::instance().debugContext(
                 "CoreClient",
                 QString("channel-status: state=%1 projection_ready=%2 video_ready=%3 media_audio_ready=%4 "
-                        "control_version_received=%5 service_discovery_completed=%6 reason=%7")
+                        "control_version_received=%5 service_discovery_completed=%6 video_transport_mode=%7 reason=%8")
                     .arg(connectionStateName)
                     .arg(newProjectionReady ? "true" : "false")
                     .arg(newVideoReady ? "true" : "false")
                     .arg(newAudioReady ? "true" : "false")
                     .arg(controlVersionReceived ? "true" : "false")
                     .arg(serviceDiscoveryCompleted ? "true" : "false")
+                    .arg(newVideoTransportMode)
                     .arg(reason));
+
+            if (newVideoTransportMode != m_videoTransportMode) {
+                m_videoTransportMode = newVideoTransportMode;
+                emit videoTransportModeChanged(m_videoTransportMode);
+            }
 
             if (newVideoReady != m_videoReady) {
                 if (m_state == ConnectionState::Connected && !newVideoReady && coreReportsConnected) {
@@ -670,6 +690,8 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                     emit videoStateChanged(true);
                 }
             }
+        } else if (topic.startsWith(QStringLiteral("android-auto/webrtc/"))) {
+            emit webRtcSignalingReceived(topic, payload.toVariantMap());
         } else if (topic.startsWith(QStringLiteral("bluetooth/"))) {
             emit bluetoothEventReceived(topic, payload.toVariantMap());
         }

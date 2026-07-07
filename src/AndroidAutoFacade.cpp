@@ -78,6 +78,8 @@ auto AndroidAutoFacade::isProjectionReady() const -> bool { return m_isProjectio
 
 auto AndroidAutoFacade::projectionFrameUrl() const -> QString { return m_projectionFrameUrl; }
 
+auto AndroidAutoFacade::videoTransportMode() const -> QString { return m_videoTransportMode; }
+
 auto AndroidAutoFacade::projectionWidth() const -> int { return m_projectionWidth; }
 
 auto AndroidAutoFacade::projectionHeight() const -> int { return m_projectionHeight; }
@@ -144,6 +146,22 @@ auto AndroidAutoFacade::disconnectDevice() -> void {
 
     m_connectedDeviceName.clear();
     emit connectedDeviceNameChanged(m_connectedDeviceName);
+}
+
+auto AndroidAutoFacade::sendWebRtcSignalingMessage(const QString& topic, const QVariantMap& payload)
+    -> void {
+    auto* aaService = m_serviceProvider->androidAutoService();
+    if (!aaService) {
+        reportError("AndroidAuto service not available");
+        return;
+    }
+
+    if (!topic.startsWith(QStringLiteral("android-auto/webrtc/"))) {
+        reportError(QStringLiteral("Invalid WebRTC signaling topic: %1").arg(topic));
+        return;
+    }
+
+    aaService->publish(topic, QJsonObject::fromVariantMap(payload));
 }
 
 auto AndroidAutoFacade::retryConnection() -> void {
@@ -332,6 +350,20 @@ auto AndroidAutoFacade::onCoreAudioStateChanged(bool active) -> void {
     }
 }
 
+auto AndroidAutoFacade::onCoreVideoTransportModeChanged(const QString& mode) -> void {
+    if (m_videoTransportMode == mode) {
+        return;
+    }
+
+    m_videoTransportMode = mode;
+    emit videoTransportModeChanged(m_videoTransportMode);
+}
+
+auto AndroidAutoFacade::onCoreWebRtcSignalingReceived(const QString& topic,
+                                                      const QVariantMap& payload) -> void {
+    emit webRtcSignalingReceived(topic, payload);
+}
+
 auto AndroidAutoFacade::onCoreProjectionReadyChanged(bool ready) -> void {
     if (m_isProjectionReady != ready) {
         m_isProjectionReady = ready;
@@ -373,6 +405,10 @@ auto AndroidAutoFacade::setupEventBusConnections() -> void {
             &AndroidAutoFacade::onCoreVideoStateChanged);
         connect(coreClient, &CoreClient::videoFrameReceived, this,
             &AndroidAutoFacade::onCoreVideoFrameReceived);
+        connect(coreClient, &CoreClient::videoTransportModeChanged, this,
+            &AndroidAutoFacade::onCoreVideoTransportModeChanged);
+        connect(coreClient, &CoreClient::webRtcSignalingReceived, this,
+            &AndroidAutoFacade::onCoreWebRtcSignalingReceived);
         connect(coreClient, &CoreClient::audioStateChanged, this,
             &AndroidAutoFacade::onCoreAudioStateChanged);
         connect(coreClient, &CoreClient::projectionReadyChanged, this,

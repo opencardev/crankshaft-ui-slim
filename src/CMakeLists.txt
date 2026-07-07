@@ -90,6 +90,14 @@ find_package(Qt6 REQUIRED COMPONENTS
     DBus
 )
 
+# Find optional GStreamer bits for the WebRTC receiver path
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GSTREAMER QUIET gstreamer-1.0)
+pkg_check_modules(GSTREAMER_APP QUIET gstreamer-app-1.0)
+pkg_check_modules(GSTREAMER_VIDEO QUIET gstreamer-video-1.0)
+pkg_check_modules(GSTREAMER_WEBRTC QUIET gstreamer-webrtc-1.0)
+pkg_check_modules(GSTREAMER_SDP QUIET gstreamer-sdp-1.0)
+
 # Optional translation tooling (qt6-l10n-tools on Debian/Ubuntu).
 # Keep the build working when LinguistTools is not installed.
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
@@ -103,6 +111,13 @@ qt_add_executable(crankshaft-ui-slim
     ServiceProvider.cpp
     AndroidAutoFacade.h
     AndroidAutoFacade.cpp
+    AndroidAutoWebRtcSession.h
+    AndroidAutoWebRtcSession.cpp
+    AndroidAutoWebRtcReceiver.h
+    AndroidAutoWebRtcReceiver.cpp
+    ProjectionVideoRenderer.h
+    QVideoSinkProjectionVideoRenderer.h
+    QVideoSinkProjectionVideoRenderer.cpp
     PreferencesFacade.h
     PreferencesFacade.cpp
     SettingsMigration.h
@@ -150,12 +165,28 @@ target_link_libraries(crankshaft-ui-slim PRIVATE
     Qt6::Network
     Qt6::WebSockets
     Qt6::DBus
+    ${GSTREAMER_LIBRARIES}
+    ${GSTREAMER_APP_LIBRARIES}
+    ${GSTREAMER_VIDEO_LIBRARIES}
+    ${GSTREAMER_WEBRTC_LIBRARIES}
+    ${GSTREAMER_SDP_LIBRARIES}
 )
 
 # Include directories
 target_include_directories(crankshaft-ui-slim PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GSTREAMER_INCLUDE_DIRS}
+    ${GSTREAMER_APP_INCLUDE_DIRS}
+    ${GSTREAMER_VIDEO_INCLUDE_DIRS}
+    ${GSTREAMER_WEBRTC_INCLUDE_DIRS}
+    ${GSTREAMER_SDP_INCLUDE_DIRS}
 )
+
+if(GSTREAMER_FOUND AND GSTREAMER_APP_FOUND AND GSTREAMER_VIDEO_FOUND AND GSTREAMER_WEBRTC_FOUND AND GSTREAMER_SDP_FOUND)
+    target_compile_definitions(crankshaft-ui-slim PRIVATE CRANKSHAFT_UI_GSTREAMER_WEBRTC=1)
+else()
+    target_compile_definitions(crankshaft-ui-slim PRIVATE CRANKSHAFT_UI_GSTREAMER_WEBRTC=0)
+endif()
 
 # Add QML resources (QML files)
 qt_add_resources(crankshaft-ui-slim "qml"
@@ -304,6 +335,7 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # Keep explicit Qt runtime dependencies and allow both legacy and t64
 # package names so dependencies resolve across Debian/Ubuntu releases.
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "crankshaft-core, libqt6core6 | libqt6core6t64, libqt6gui6 | libqt6gui6t64, libqt6qml6 | libqt6qml6t64, libqt6quick6 | libqt6quick6t64, libqt6multimedia6 | libqt6multimedia6t64, libqt6sql6 | libqt6sql6t64, libqt6network6 | libqt6network6t64, libqt6websockets6 | libqt6websockets6t64, libqt6dbus6 | libqt6dbus6t64, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qt6-qpa-plugins")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "crankshaft-core, libqt6core6 | libqt6core6t64, libqt6gui6 | libqt6gui6t64, libqt6qml6 | libqt6qml6t64, libqt6quick6 | libqt6quick6t64, libqt6multimedia6 | libqt6multimedia6t64, libqt6sql6 | libqt6sql6t64, libqt6network6 | libqt6network6t64, libqt6websockets6 | libqt6websockets6t64, libqt6dbus6 | libqt6dbus6t64, libgstreamer1.0-0 | libgstreamer1.0-0t64, libgstreamer-plugins-base1.0-0 | libgstreamer-plugins-base1.0-0t64, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qml6-module-qtmultimedia, qt6-qpa-plugins")
 set(CPACK_COMPONENTS_ALL ui-slim)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_SOURCE_DIR}/packaging/ui-slim/postinst;${CMAKE_SOURCE_DIR}/packaging/ui-slim/prerm"
