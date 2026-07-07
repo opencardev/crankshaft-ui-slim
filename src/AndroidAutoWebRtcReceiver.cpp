@@ -256,7 +256,8 @@ void AndroidAutoWebRtcReceiver::teardownPipeline() {
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(GstPromise* promise, void* userData) {
+void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(struct _GstPromise* promise,
+                                                            void* userData) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     auto* self = static_cast<AndroidAutoWebRtcReceiver*>(userData);
     self->handleAnswerCreated(promise);
@@ -266,7 +267,7 @@ void AndroidAutoWebRtcReceiver::onNegotiationAnswerCreated(GstPromise* promise, 
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onIncomingPadAdded(GstElement* element, GstPad* pad,
+void AndroidAutoWebRtcReceiver::onIncomingPadAdded(struct _GstElement* element, struct _GstPad* pad,
                                                    void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
@@ -278,7 +279,7 @@ void AndroidAutoWebRtcReceiver::onIncomingPadAdded(GstElement* element, GstPad* 
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onDecodebinPadAdded(GstElement* element, GstPad* pad,
+void AndroidAutoWebRtcReceiver::onDecodebinPadAdded(struct _GstElement* element, struct _GstPad* pad,
                                                     void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
@@ -304,11 +305,11 @@ int AndroidAutoWebRtcReceiver::onNewSample(void* sink, void* userData) {
 #else
     Q_UNUSED(sink)
     Q_UNUSED(userData)
-    return GST_FLOW_ERROR;
+    return -1;
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::onLocalIceCandidate(GstElement* element, unsigned int mlineIndex,
+void AndroidAutoWebRtcReceiver::onLocalIceCandidate(struct _GstElement* element, unsigned int mlineIndex,
                                                     char* candidate, void* userData) {
     Q_UNUSED(element)
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
@@ -326,7 +327,7 @@ void AndroidAutoWebRtcReceiver::onLocalIceCandidate(GstElement* element, unsigne
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::handleAnswerCreated(GstPromise* promise) {
+void AndroidAutoWebRtcReceiver::handleAnswerCreated(struct _GstPromise* promise) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     const GstStructure* reply = gst_promise_get_reply(promise);
     if (!reply) {
@@ -363,7 +364,7 @@ void AndroidAutoWebRtcReceiver::handleAnswerCreated(GstPromise* promise) {
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::handleIncomingPad(GstPad* pad) {
+void AndroidAutoWebRtcReceiver::handleIncomingPad(struct _GstPad* pad) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     if (m_incomingPadLinked || !m_incomingQueue) {
         return;
@@ -391,7 +392,7 @@ void AndroidAutoWebRtcReceiver::handleIncomingPad(GstPad* pad) {
 #endif
 }
 
-void AndroidAutoWebRtcReceiver::handleDecodebinPad(GstPad* pad) {
+void AndroidAutoWebRtcReceiver::handleDecodebinPad(struct _GstPad* pad) {
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     if (m_decodePadLinked || !m_videoConvert) {
         return;
@@ -419,10 +420,10 @@ void AndroidAutoWebRtcReceiver::handleDecodebinPad(GstPad* pad) {
 #endif
 }
 
-auto AndroidAutoWebRtcReceiver::pushSampleToRenderer(GstSample* sample) -> int {
+auto AndroidAutoWebRtcReceiver::pushSampleToRenderer(struct _GstSample* sample) -> int {
 #if !CRANKSHAFT_UI_GSTREAMER_WEBRTC
     Q_UNUSED(sample)
-    return GST_FLOW_ERROR;
+    return -1;
 #else
     if (!sample || !m_renderer) {
         return GST_FLOW_ERROR;
