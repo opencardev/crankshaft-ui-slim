@@ -27,6 +27,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QQuickStyle>
 #include <QTimer>
 
@@ -207,6 +208,12 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
         }
 
         QQmlApplicationEngine engine;
+
+        QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError>& warnings) {
+            for (const QQmlError& warning : warnings) {
+                Logger::instance().errorContext("QML", warning.toString());
+            }
+        });
 
         engine.rootContext()->setContextProperty("_serviceProvider", &services);
         engine.rootContext()->setContextProperty("_androidAutoFacade", &androidAutoFacade);
