@@ -46,7 +46,10 @@ Item {
     // TouchEventForwarder reference (set by parent or use global _touchForwarder)
     property var touchForwarder: _touchForwarder
     property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
-    readonly property bool webRtcActive: androidAutoFacade && androidAutoFacade.videoTransportMode === "webrtc" && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active
+    readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode === "webrtc"
+    readonly property bool webRtcHealthy: androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active && androidAutoWebRtcReceiver.healthy
+    readonly property bool webRtcFallbackActive: webRtcSelected && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.fallbackRecommended
+    readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
     
     // Update touch forwarder display size when view size changes
     onWidthChanged: {
@@ -133,7 +136,7 @@ Item {
         // Decode each frame synchronously to avoid blanking between rapidly
         // changing data URLs on the projection surface.
         asynchronous: false
-        visible: !webRtcActive && source !== ""
+        visible: (!webRtcActive || webRtcFallbackActive) && source !== ""
 
         onPaintedWidthChanged: projectionView.updateTouchForwarderDisplaySize()
         onPaintedHeightChanged: projectionView.updateTouchForwarderDisplaySize()

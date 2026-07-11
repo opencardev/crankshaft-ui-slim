@@ -276,6 +276,9 @@ private slots:
         QSignalSpy activeSpy(&session, &AndroidAutoWebRtcSession::activeChanged);
         QSignalSpy offerSpy(&session, &AndroidAutoWebRtcSession::remoteOfferReceived);
 
+        facade.connectToDevice(QStringLiteral("pixel-mock"));
+        QTRY_COMPARE(facade.connectionState(), static_cast<int>(AndroidAutoFacade::Connected));
+
         m_mockCoreClient->emitVideoTransportMode(QStringLiteral("webrtc"));
         QTRY_VERIFY(session.active());
         QVERIFY(!activeSpy.isEmpty());
@@ -301,6 +304,61 @@ private slots:
         QTRY_COMPARE(m_mockCoreClient->publishCalls, 2);
         QCOMPARE(m_mockCoreClient->publishedTopics.last(),
                  QStringLiteral("android-auto/webrtc/ice-candidate"));
+    }
+
+    void testChannelStatusIgnoresTransientFalseReadinessWhenConnected() {
+        CoreClient client;
+
+        QSignalSpy connectionSpy(&client, &CoreClient::connectionStateChanged);
+        QSignalSpy videoStateSpy(&client, &CoreClient::videoStateChanged);
+        QSignalSpy projectionSpy(&client, &CoreClient::projectionReadyChanged);
+
+        const QString connectedMessage = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"initial_ready"}})"
+        );
+        const QString transientFalseMessage = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":false,"video_ready":false,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"transient_reconfig"}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, connectedMessage)));
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, transientFalseMessage)));
+
+        QVERIFY(!connectionSpy.isEmpty());
+        QCOMPARE(connectionSpy.last().at(0).toInt(),
+                 static_cast<int>(CoreClient::ConnectionState::Connected));
+
+        QCOMPARE(videoStateSpy.count(), 1);
+        QCOMPARE(videoStateSpy.at(0).at(0).toBool(), true);
+
+        QCOMPARE(projectionSpy.count(), 1);
+        QCOMPARE(projectionSpy.at(0).at(0).toBool(), true);
+    }
+
+    void testChannelStatusDoesNotClearTransportModeOnTransientEmptyValue() {
+        CoreClient client;
+
+        QSignalSpy transportSpy(&client, &CoreClient::videoTransportModeChanged);
+
+        const QString firstStatus = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"initialized"}})"
+        );
+        const QString secondStatus = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"","reason":"transient_missing_mode"}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, firstStatus)));
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, secondStatus)));
+
+        QCOMPARE(transportSpy.count(), 1);
+        QCOMPARE(transportSpy.at(0).at(0).toString(), QStringLiteral("webrtc"));
     }
 
 private:

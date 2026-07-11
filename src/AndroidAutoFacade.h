@@ -85,6 +85,16 @@ class AndroidAutoFacade : public QObject {
      */
     Q_PROPERTY(int projectionHeight READ projectionHeight NOTIFY projectionFrameChanged)
 
+    /**
+     * @brief True when core prefers WebRTC transport mode.
+     */
+    Q_PROPERTY(bool isWebRtcPreferred READ isWebRtcPreferred NOTIFY videoTransportModeChanged)
+
+    /**
+     * @brief True when a JPEG fallback frame is currently available for rendering.
+     */
+    Q_PROPERTY(bool hasProjectionFallbackFrame READ hasProjectionFallbackFrame NOTIFY projectionFrameUrlChanged)
+
 public:
     enum ConnectionState {
         Disconnected = 0,
@@ -109,6 +119,8 @@ public:
     [[nodiscard]] auto videoTransportMode() const -> QString;
     [[nodiscard]] auto projectionWidth() const -> int;
     [[nodiscard]] auto projectionHeight() const -> int;
+    [[nodiscard]] auto isWebRtcPreferred() const -> bool;
+    [[nodiscard]] auto hasProjectionFallbackFrame() const -> bool;
 
     /**
      * @brief Q_INVOKABLE methods for QML interface

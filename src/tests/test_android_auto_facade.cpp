@@ -32,6 +32,10 @@ public:
 
     auto emitVideoState(bool active) -> void { emit videoStateChanged(active); }
 
+    auto emitVideoTransportMode(const QString& mode) -> void {
+        emit videoTransportModeChanged(mode);
+    }
+
     auto emitVideoFrame(const QString& frameUrl, int width = 1280, int height = 720) -> void {
         emit videoFrameReceived(frameUrl, width, height);
     }
@@ -191,6 +195,24 @@ private slots:
         QVERIFY(facade.projectionFrameUrl().isEmpty());
         QCOMPARE(facade.projectionWidth(), 0);
         QCOMPARE(facade.projectionHeight(), 0);
+    }
+
+    void testWebRtcPreferenceAndFallbackFrameExposure() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+
+        QVERIFY(m_mockCoreClient != nullptr);
+        QVERIFY(!facade.isWebRtcPreferred());
+        QVERIFY(!facade.hasProjectionFallbackFrame());
+
+        m_mockCoreClient->emitVideoTransportMode(QStringLiteral("webrtc"));
+        QTRY_VERIFY(facade.isWebRtcPreferred());
+
+        m_mockCoreClient->emitVideoFrame(QStringLiteral("data:image/jpeg;base64,fallback"), 640, 360);
+        QTRY_VERIFY(facade.hasProjectionFallbackFrame());
+
+        m_mockCoreClient->emitVideoFrame(QString(), 0, 0);
+        QTRY_VERIFY(!facade.hasProjectionFallbackFrame());
     }
 };
 

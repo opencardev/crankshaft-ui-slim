@@ -19,11 +19,16 @@
 
 #include "AndroidAutoWebRtcReceiver.h"
 
+#include <QDateTime>
 #include <QImage>
 
 #include "AndroidAutoWebRtcSession.h"
 #include "Logger.h"
 #include "QVideoSinkProjectionVideoRenderer.h"
+
+namespace {
+constexpr int kWebRtcFrameStallTimeoutMs = 900;
+}
 
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
 #include <gst/app/gstappsink.h>
@@ -37,6 +42,11 @@ AndroidAutoWebRtcReceiver::AndroidAutoWebRtcReceiver(
     AndroidAutoWebRtcSession* session, std::unique_ptr<ProjectionVideoRenderer> renderer,
     QObject* parent)
     : QObject(parent), m_session(session) {
+        m_frameStallTimer.setSingleShot(true);
+        m_frameStallTimer.setInterval(kWebRtcFrameStallTimeoutMs);
+        connect(&m_frameStallTimer, &QTimer::timeout, this,
+                &AndroidAutoWebRtcReceiver::onFrameStallTimeout);
+
     if (renderer) {
         m_renderer = std::move(renderer);
     } else {
@@ -68,6 +78,20 @@ AndroidAutoWebRtcReceiver::~AndroidAutoWebRtcReceiver() {
 
 auto AndroidAutoWebRtcReceiver::active() const -> bool { return m_active; }
 
+auto AndroidAutoWebRtcReceiver::healthy() const -> bool { return m_healthy; }
+
+auto AndroidAutoWebRtcReceiver::stalled() const -> bool { return m_stalled; }
+
+auto AndroidAutoWebRtcReceiver::recoverableError() const -> bool { return m_recoverableError; }
+
+auto AndroidAutoWebRtcReceiver::fallbackRecommended() const -> bool {
+    return m_fallbackRecommended;
+}
+
+auto AndroidAutoWebRtcReceiver::lastFrameTimestampMs() const -> qint64 {
+    return m_lastFrameTimestampMs;
+}
+
 auto AndroidAutoWebRtcReceiver::lastError() const -> QString { return m_lastError; }
 
 auto AndroidAutoWebRtcReceiver::videoSinkObject() const -> QObject* {
@@ -82,11 +106,19 @@ void AndroidAutoWebRtcReceiver::onSessionActiveChanged(bool active) {
     setActive(active);
 
     if (!active) {
+        m_frameStallTimer.stop();
+        setHealthy(false);
+        setStalled(false);
+        setRecoverableError(false);
+        setLastFrameTimestampMs(0);
         teardownPipeline();
         if (m_renderer) {
             m_renderer->clear();
         }
+        return;
     }
+
+    m_frameStallTimer.start();
 }
 
 void AndroidAutoWebRtcReceiver::onRemoteOfferReceived(const QString& sdp,
@@ -99,6 +131,9 @@ void AndroidAutoWebRtcReceiver::onRemoteOfferReceived(const QString& sdp,
 
 #if !CRANKSHAFT_UI_GSTREAMER_WEBRTC
     Q_UNUSED(sdp)
+    setRecoverableError(true);
+    setHealthy(false);
+    setStalled(true);
     setLastError(QStringLiteral("ui-slim built without GStreamer WebRTC receiver support"));
     return;
 #else
@@ -114,6 +149,9 @@ void AndroidAutoWebRtcReceiver::onRemoteOfferReceived(const QString& sdp,
         if (sdpMessage) {
             gst_sdp_message_free(sdpMessage);
         }
+        setRecoverableError(true);
+        setHealthy(false);
+        setStalled(true);
         setLastError(QStringLiteral("Failed to parse remote WebRTC offer SDP"));
         return;
     }
@@ -160,6 +198,81 @@ void AndroidAutoWebRtcReceiver::setActive(bool active) {
 
     m_active = active;
     emit activeChanged(m_active);
+    refreshFallbackRecommendation();
+}
+
+void AndroidAutoWebRtcReceiver::setHealthy(bool healthy) {
+    if (m_healthy == healthy) {
+        return;
+    }
+
+    m_healthy = healthy;
+    emit healthyChanged(m_healthy);
+    refreshFallbackRecommendation();
+}
+
+void AndroidAutoWebRtcReceiver::setStalled(bool stalled) {
+    if (m_stalled == stalled) {
+        return;
+    }
+
+    m_stalled = stalled;
+    emit stalledChanged(m_stalled);
+}
+
+void AndroidAutoWebRtcReceiver::setRecoverableError(bool recoverableError) {
+    if (m_recoverableError == recoverableError) {
+        return;
+    }
+
+    m_recoverableError = recoverableError;
+    emit recoverableErrorChanged(m_recoverableError);
+    refreshFallbackRecommendation();
+}
+
+void AndroidAutoWebRtcReceiver::setLastFrameTimestampMs(qint64 timestampMs) {
+    if (m_lastFrameTimestampMs == timestampMs) {
+        return;
+    }
+
+    m_lastFrameTimestampMs = timestampMs;
+    emit lastFrameTimestampMsChanged(m_lastFrameTimestampMs);
+}
+
+void AndroidAutoWebRtcReceiver::refreshFallbackRecommendation() {
+    const bool fallback = m_active && (!m_healthy || m_recoverableError);
+    if (m_fallbackRecommended == fallback) {
+        return;
+    }
+
+    m_fallbackRecommended = fallback;
+    emit fallbackRecommendedChanged(m_fallbackRecommended);
+}
+
+void AndroidAutoWebRtcReceiver::markFrameReceived() {
+    if (!m_active) {
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    setLastFrameTimestampMs(nowMs);
+    setStalled(false);
+    setRecoverableError(false);
+    setHealthy(true);
+    m_frameStallTimer.start();
+}
+
+void AndroidAutoWebRtcReceiver::onFrameStallTimeout() {
+    if (!m_active) {
+        return;
+    }
+
+    if (!m_stalled) {
+        Logger::instance().warningContext("AndroidAutoWebRtcReceiver",
+                                          "WebRTC frame flow stalled; enabling fallback");
+    }
+    setStalled(true);
+    setHealthy(false);
 }
 
 void AndroidAutoWebRtcReceiver::setLastError(const QString& error) {
@@ -170,6 +283,11 @@ void AndroidAutoWebRtcReceiver::setLastError(const QString& error) {
     m_lastError = error;
     emit lastErrorChanged(m_lastError);
     if (!m_lastError.isEmpty()) {
+        if (m_active) {
+            setRecoverableError(true);
+            setHealthy(false);
+            setStalled(true);
+        }
         Logger::instance().errorContext("AndroidAutoWebRtcReceiver", m_lastError);
     }
 }
@@ -211,6 +329,9 @@ auto AndroidAutoWebRtcReceiver::ensurePipeline() -> bool {
 
     if (!gst_element_link_many(m_incomingQueue, m_h264Depay, m_h264Parse, m_decodeBin, nullptr) ||
         !gst_element_link(m_videoConvert, m_appSink)) {
+        setRecoverableError(true);
+        setHealthy(false);
+        setStalled(true);
         setLastError(QStringLiteral("Failed to link WebRTC receiver pipeline"));
         teardownPipeline();
         return false;
@@ -226,6 +347,9 @@ auto AndroidAutoWebRtcReceiver::ensurePipeline() -> bool {
                      this);
 
     if (gst_element_set_state(m_pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+        setRecoverableError(true);
+        setHealthy(false);
+        setStalled(true);
         setLastError(QStringLiteral("Failed to start WebRTC receiver pipeline"));
         teardownPipeline();
         return false;
@@ -459,6 +583,7 @@ auto AndroidAutoWebRtcReceiver::pushSampleToRenderer(struct _GstSample* sample) 
 
     QMetaObject::invokeMethod(this,
                               [this, imageCopy]() {
+                                  markFrameReceived();
                                   if (m_renderer) {
                                       m_renderer->presentImage(imageCopy);
                                   }
