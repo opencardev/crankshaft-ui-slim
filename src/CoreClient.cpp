@@ -603,8 +603,9 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const QString reportedVideoTransportMode =
                 payload.value("video_transport_mode").toString();
             const QString newVideoTransportMode =
-                reportedVideoTransportMode.trimmed().isEmpty() ? m_videoTransportMode
-                                                               : reportedVideoTransportMode;
+                reportedVideoTransportMode.trimmed().isEmpty()
+                    ? m_videoTransportMode
+                    : reportedVideoTransportMode.trimmed().toLower();
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
 
