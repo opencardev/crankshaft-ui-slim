@@ -21,6 +21,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <QVariantMap>
 #include <memory>
 
@@ -36,6 +37,11 @@ class AndroidAutoWebRtcReceiver : public QObject {
     Q_OBJECT
 
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
+    Q_PROPERTY(bool healthy READ healthy NOTIFY healthyChanged)
+    Q_PROPERTY(bool stalled READ stalled NOTIFY stalledChanged)
+    Q_PROPERTY(bool recoverableError READ recoverableError NOTIFY recoverableErrorChanged)
+    Q_PROPERTY(bool fallbackRecommended READ fallbackRecommended NOTIFY fallbackRecommendedChanged)
+    Q_PROPERTY(qint64 lastFrameTimestampMs READ lastFrameTimestampMs NOTIFY lastFrameTimestampMsChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QObject* videoSinkObject READ videoSinkObject CONSTANT)
     Q_PROPERTY(QString rendererBackend READ rendererBackend CONSTANT)
@@ -47,21 +53,38 @@ public:
     ~AndroidAutoWebRtcReceiver() override;
 
     [[nodiscard]] auto active() const -> bool;
+    [[nodiscard]] auto healthy() const -> bool;
+    [[nodiscard]] auto stalled() const -> bool;
+    [[nodiscard]] auto recoverableError() const -> bool;
+    [[nodiscard]] auto fallbackRecommended() const -> bool;
+    [[nodiscard]] auto lastFrameTimestampMs() const -> qint64;
     [[nodiscard]] auto lastError() const -> QString;
     [[nodiscard]] auto videoSinkObject() const -> QObject*;
     [[nodiscard]] auto rendererBackend() const -> QString;
 
 signals:
     void activeChanged(bool active);
+    void healthyChanged(bool healthy);
+    void stalledChanged(bool stalled);
+    void recoverableErrorChanged(bool recoverableError);
+    void fallbackRecommendedChanged(bool fallbackRecommended);
+    void lastFrameTimestampMsChanged(qint64 timestampMs);
     void lastErrorChanged(const QString& error);
 
 private slots:
     void onSessionActiveChanged(bool active);
     void onRemoteOfferReceived(const QString& sdp, const QVariantMap& payload);
     void onRemoteIceCandidateReceived(const QVariantMap& payload);
+    void onFrameStallTimeout();
 
 private:
     void setActive(bool active);
+    void setHealthy(bool healthy);
+    void setStalled(bool stalled);
+    void setRecoverableError(bool recoverableError);
+    void setLastFrameTimestampMs(qint64 timestampMs);
+    void refreshFallbackRecommendation();
+    void markFrameReceived();
     void setLastError(const QString& error);
     auto ensurePipeline() -> bool;
     void teardownPipeline();
@@ -83,7 +106,13 @@ private:
     AndroidAutoWebRtcSession* m_session{nullptr};
     std::unique_ptr<ProjectionVideoRenderer> m_renderer;
     bool m_active{false};
+    bool m_healthy{false};
+    bool m_stalled{false};
+    bool m_recoverableError{false};
+    bool m_fallbackRecommended{false};
+    qint64 m_lastFrameTimestampMs{0};
     QString m_lastError;
+    QTimer m_frameStallTimer;
 
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     struct _GstElement* m_pipeline{nullptr};

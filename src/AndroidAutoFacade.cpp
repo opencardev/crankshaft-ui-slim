@@ -84,6 +84,14 @@ auto AndroidAutoFacade::projectionWidth() const -> int { return m_projectionWidt
 
 auto AndroidAutoFacade::projectionHeight() const -> int { return m_projectionHeight; }
 
+auto AndroidAutoFacade::isWebRtcPreferred() const -> bool {
+    return m_videoTransportMode.compare(QStringLiteral("webrtc"), Qt::CaseInsensitive) == 0;
+}
+
+auto AndroidAutoFacade::hasProjectionFallbackFrame() const -> bool {
+    return !m_projectionFrameUrl.isEmpty();
+}
+
 // Q_INVOKABLE methods
 auto AndroidAutoFacade::startDiscovery() -> void {
     Logger::instance().infoContext("AndroidAutoFacade", "Starting device discovery");

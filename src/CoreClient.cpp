@@ -600,7 +600,11 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const bool serviceDiscoveryCompleted = payload.value("service_discovery_completed").toBool(false);
             const QString connectionStateName = payload.value("connection_state_name").toString();
             const QString reason = payload.value("reason").toString();
-            const QString newVideoTransportMode = payload.value("video_transport_mode").toString();
+            const QString reportedVideoTransportMode =
+                payload.value("video_transport_mode").toString();
+            const QString newVideoTransportMode =
+                reportedVideoTransportMode.trimmed().isEmpty() ? m_videoTransportMode
+                                                               : reportedVideoTransportMode;
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
 

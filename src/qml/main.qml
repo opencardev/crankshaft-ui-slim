@@ -404,7 +404,10 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: theme.colors.background
-                    readonly property bool webRtcActive: _androidAutoFacade && _androidAutoFacade.videoTransportMode === "webrtc" && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active
+                    readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode === "webrtc"
+                    readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
+                    readonly property bool webRtcFallbackActive: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
+                    readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
 
                     function videoContentRect() {
                         if (projectionVideoLoader.item && projectionVideoLoader.item.contentRect) {
@@ -617,7 +620,7 @@ ApplicationWindow {
                         // Keep the frame swap synchronous so the inline projection
                         // surface does not flash between successive video frames.
                         asynchronous: false
-                        visible: !projectionSurface.webRtcActive && source !== ""
+                        visible: (!projectionSurface.webRtcActive || projectionSurface.webRtcFallbackActive) && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
