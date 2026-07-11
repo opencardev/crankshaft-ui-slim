@@ -65,9 +65,12 @@ private:
     void setActive(bool active);
     void setSignalingState(const QString& state);
     void setLastError(const QString& error);
+    void refreshActiveState();
 
     AndroidAutoFacade* m_androidAutoFacade;
     bool m_active{false};
+    bool m_transportModeWebRtc{false};
+    bool m_connectionReady{false};
     QString m_signalingState;
     QString m_remoteOfferSdp;
     QString m_lastError;

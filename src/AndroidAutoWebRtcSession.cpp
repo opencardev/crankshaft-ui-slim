@@ -44,6 +44,7 @@ AndroidAutoWebRtcSession::AndroidAutoWebRtcSession(AndroidAutoFacade* androidAut
     connect(m_androidAutoFacade, &AndroidAutoFacade::connectionStateChanged, this,
             &AndroidAutoWebRtcSession::onConnectionStateChanged);
 
+    onConnectionStateChanged(m_androidAutoFacade->connectionState());
     onVideoTransportModeChanged(m_androidAutoFacade->videoTransportMode());
 }
 
@@ -104,7 +105,9 @@ void AndroidAutoWebRtcSession::resetSession() {
 }
 
 void AndroidAutoWebRtcSession::onVideoTransportModeChanged(const QString& mode) {
-    setActive(mode.compare(QStringLiteral("webrtc"), Qt::CaseInsensitive) == 0);
+    m_transportModeWebRtc =
+        mode.compare(QStringLiteral("webrtc"), Qt::CaseInsensitive) == 0;
+    refreshActiveState();
 }
 
 void AndroidAutoWebRtcSession::onWebRtcSignalingReceived(const QString& topic,
@@ -132,9 +135,16 @@ void AndroidAutoWebRtcSession::onWebRtcSignalingReceived(const QString& topic,
 }
 
 void AndroidAutoWebRtcSession::onConnectionStateChanged(int state) {
+    m_connectionReady = (state == AndroidAutoFacade::Connected);
+    refreshActiveState();
+
     if (state == AndroidAutoFacade::Disconnected || state == AndroidAutoFacade::Error) {
         resetSession();
     }
+}
+
+void AndroidAutoWebRtcSession::refreshActiveState() {
+    setActive(m_transportModeWebRtc && m_connectionReady);
 }
 
 void AndroidAutoWebRtcSession::setActive(bool active) {
