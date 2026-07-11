@@ -361,6 +361,23 @@ private slots:
         QCOMPARE(transportSpy.at(0).at(0).toString(), QStringLiteral("webrtc"));
     }
 
+    void testChannelStatusNormalizesTransportModeCase() {
+        CoreClient client;
+
+        QSignalSpy transportSpy(&client, &CoreClient::videoTransportModeChanged);
+
+        const QString status = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"WebRTC","reason":"case_variant"}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, status)));
+
+        QCOMPARE(transportSpy.count(), 1);
+        QCOMPARE(transportSpy.at(0).at(0).toString(), QStringLiteral("webrtc"));
+    }
+
 private:
     MockCoreClient* m_mockCoreClient = nullptr;
 };

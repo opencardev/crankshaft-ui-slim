@@ -182,7 +182,7 @@ void AndroidAutoWebRtcReceiver::onRemoteIceCandidateReceived(const QVariantMap& 
 
     const QString candidate = payload.value(QStringLiteral("candidate")).toString();
     const int mlineIndex = payload.value(QStringLiteral("sdpMLineIndex"), 0).toInt();
-    if (candidate.trimmed().isEmpty()) {
+    if (candidate.trimmed().isEmpty() || mlineIndex < 0) {
         return;
     }
 
