@@ -46,7 +46,7 @@ Item {
     // TouchEventForwarder reference (set by parent or use global _touchForwarder)
     property var touchForwarder: _touchForwarder
     property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
-    readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode === "webrtc"
+    readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
     readonly property bool webRtcHealthy: androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active && androidAutoWebRtcReceiver.healthy
     readonly property bool webRtcFallbackActive: webRtcSelected && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.fallbackRecommended
     readonly property bool webRtcActive: webRtcSelected && webRtcHealthy

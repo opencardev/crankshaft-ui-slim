@@ -404,7 +404,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: theme.colors.background
-                    readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode === "webrtc"
+                    readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
                     readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
                     readonly property bool webRtcFallbackActive: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
                     readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
