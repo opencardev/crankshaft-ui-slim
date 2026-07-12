@@ -107,5 +107,7 @@ private:
     bool m_videoReady = false;
     bool m_audioReady = false;
     QString m_videoTransportMode;
+    QString m_videoTransportRequestedMode;
+    QString m_videoTransportFallbackReason;
     QTimer* m_connectTimeoutTimer = nullptr;
 };
