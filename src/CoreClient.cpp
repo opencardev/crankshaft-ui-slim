@@ -602,17 +602,29 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const QString reason = payload.value("reason").toString();
             const QString reportedVideoTransportMode =
                 payload.value("video_transport_mode").toString();
+            const QString reportedVideoTransportRequestedMode =
+                payload.value("video_transport_requested").toString();
+            const QString reportedVideoTransportFallbackReason =
+                payload.value("video_transport_fallback_reason").toString();
             const QString newVideoTransportMode =
                 reportedVideoTransportMode.trimmed().isEmpty()
                     ? m_videoTransportMode
                     : reportedVideoTransportMode.trimmed().toLower();
+            const QString newVideoTransportRequestedMode =
+                reportedVideoTransportRequestedMode.trimmed().isEmpty()
+                    ? m_videoTransportRequestedMode
+                    : reportedVideoTransportRequestedMode.trimmed().toLower();
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
+
+            m_videoTransportRequestedMode = newVideoTransportRequestedMode;
+            m_videoTransportFallbackReason = reportedVideoTransportFallbackReason.trimmed();
 
             Logger::instance().debugContext(
                 "CoreClient",
                 QString("channel-status: state=%1 projection_ready=%2 video_ready=%3 media_audio_ready=%4 "
-                        "control_version_received=%5 service_discovery_completed=%6 video_transport_mode=%7 reason=%8")
+                        "control_version_received=%5 service_discovery_completed=%6 video_transport_mode=%7 "
+                        "video_transport_requested=%8 video_transport_fallback_reason=%9 reason=%10")
                     .arg(connectionStateName)
                     .arg(newProjectionReady ? "true" : "false")
                     .arg(newVideoReady ? "true" : "false")
@@ -620,6 +632,8 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                     .arg(controlVersionReceived ? "true" : "false")
                     .arg(serviceDiscoveryCompleted ? "true" : "false")
                     .arg(newVideoTransportMode)
+                    .arg(newVideoTransportRequestedMode)
+                    .arg(m_videoTransportFallbackReason)
                     .arg(reason));
 
             if (newVideoTransportMode != m_videoTransportMode) {
