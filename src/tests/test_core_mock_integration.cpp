@@ -246,7 +246,7 @@ private slots:
         QSignalSpy webRtcSpy(&client, &CoreClient::webRtcSignalingReceived);
 
         const QString channelStatusMessage = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":false,"media_audio_ready":false,"video_transport_mode":"webrtc","reason":"webrtc_initialized"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":false,"media_audio_ready":false,"video_transport_mode":"webrtc","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"webrtc_initialized"}})"
         );
         const QString offerMessage = QStringLiteral(
             R"({"type":"event","topic":"android-auto/webrtc/offer","payload":{"type":"offer","sdp":"v=0"}})"
@@ -314,10 +314,10 @@ private slots:
         QSignalSpy projectionSpy(&client, &CoreClient::projectionReadyChanged);
 
         const QString connectedMessage = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"initial_ready"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"initial_ready"}})"
         );
         const QString transientFalseMessage = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":false,"video_ready":false,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"transient_reconfig"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":false,"video_ready":false,"media_audio_ready":true,"video_transport_mode":"webrtc","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"transient_reconfig"}})"
         );
 
         QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
@@ -344,10 +344,10 @@ private slots:
         QSignalSpy transportSpy(&client, &CoreClient::videoTransportModeChanged);
 
         const QString firstStatus = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","reason":"initialized"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"initialized"}})"
         );
         const QString secondStatus = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"","reason":"transient_missing_mode"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"transient_missing_mode"}})"
         );
 
         QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
@@ -367,7 +367,7 @@ private slots:
         QSignalSpy transportSpy(&client, &CoreClient::videoTransportModeChanged);
 
         const QString status = QStringLiteral(
-            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"WebRTC","reason":"case_variant"}})"
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"WebRTC","video_transport_requested":"WebRTC","video_transport_fallback_reason":"","reason":"case_variant"}})"
         );
 
         QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
