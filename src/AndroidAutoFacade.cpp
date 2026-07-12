@@ -264,6 +264,15 @@ auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int wi
     }
 
     if (frameUrl.isEmpty()) {
+        // Hold the last rendered frame while the session is still active to avoid
+        // blank-frame flashes on transient JPEG pipeline gaps.
+        if (m_connectionState == ConnectionState::Connected || m_isProjectionReady) {
+            Logger::instance().debugContext(
+                "AndroidAutoFacade",
+                "Ignoring empty projection frame while session remains active");
+            return;
+        }
+
         if (m_projectionFrameDispatchTimer.isActive()) {
             m_projectionFrameDispatchTimer.stop();
         }
