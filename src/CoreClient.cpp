@@ -675,6 +675,20 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
 
             if (coreReportsConnected && m_state != ConnectionState::Connected) {
                 setState(ConnectionState::Connected);
+            } else if (connectionStateName.compare(QStringLiteral("CONNECTING"), Qt::CaseInsensitive) == 0 ||
+                       connectionStateName.compare(QStringLiteral("AUTHENTICATING"), Qt::CaseInsensitive) == 0 ||
+                       connectionStateName.compare(QStringLiteral("SECURING"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Connecting) {
+                    setState(ConnectionState::Connecting);
+                }
+            } else if (connectionStateName.compare(QStringLiteral("SEARCHING"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Searching) {
+                    setState(ConnectionState::Searching);
+                }
+            } else if (connectionStateName.compare(QStringLiteral("ERROR"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Error) {
+                    setState(ConnectionState::Error);
+                }
             } else if (m_state == ConnectionState::Connected && !m_projectionReady) {
                 Logger::instance().debugContext(
                     "CoreClient",
