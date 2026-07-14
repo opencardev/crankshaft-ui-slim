@@ -21,14 +21,6 @@ export DEBIAN_FRONTEND=noninteractive
 
 case "$1" in
     configure)
-        # Ensure network probing utility exists for ExecStartPre readiness checks.
-        if ! command -v nc >/dev/null 2>&1; then
-            if command -v apt-get >/dev/null 2>&1; then
-                apt-get update >/dev/null 2>&1 || true
-                DEBIAN_FRONTEND=noninteractive apt-get install -y netcat-openbsd >/dev/null 2>&1 || true
-            fi
-        fi
-
         # Ensure crankshaft user exists even if slim UI package is installed first.
         if ! id -u crankshaft > /dev/null 2>&1; then
             if command -v adduser >/dev/null 2>&1; then

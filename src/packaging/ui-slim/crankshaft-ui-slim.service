@@ -26,7 +26,6 @@ Type=notify
 NotifyAccess=main
 User=crankshaft
 Group=crankshaft
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 40); do nc -z 127.0.0.1 8080 && exit 0; sleep 0.25; done; exit 1'
 ExecStart=/usr/bin/crankshaft-ui-slim
 Restart=on-failure
 RestartSec=5
