@@ -159,6 +159,14 @@ public:
     Q_INVOKABLE void sendWebRtcSignalingMessage(const QString& topic, const QVariantMap& payload);
 
     /**
+     * @brief Ask core to renegotiate the Android Auto session.
+     *
+     * Used as a recovery path when ui-slim connects late and misses the initial
+     * one-shot WebRTC offer broadcast, which would otherwise leave projection blank.
+     */
+    Q_INVOKABLE void requestRenegotiation(int relaunchDelayMs = 2500);
+
+    /**
      * @brief Retry connection to previously connected device
      * Implements exponential backoff with maximum retry attempts.
      */
