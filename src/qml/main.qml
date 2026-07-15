@@ -406,8 +406,104 @@ ApplicationWindow {
                     color: theme.colors.background
                     readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
                     readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
-                    readonly property bool webRtcFallbackActive: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
-                    readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
+                    readonly property bool webRtcFallbackRequested: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
+                    readonly property int webRtcFallbackDelayMs: 2500
+                    property bool webRtcDisplayLatched: false
+                    readonly property bool webRtcActive: webRtcSelected && webRtcDisplayLatched
+                    readonly property bool webRtcFallbackActive: webRtcSelected && !webRtcActive && webRtcFallbackRequested
+
+                    function logRenderState(reason) {
+                        console.log("[AAProjectionView] render-state reason=" + reason +
+                                    " selected=" + webRtcSelected +
+                                    " healthy=" + webRtcHealthy +
+                                    " fallbackRequested=" + webRtcFallbackRequested +
+                                    " latched=" + webRtcDisplayLatched +
+                                    " webrtcActive=" + webRtcActive +
+                                    " fallbackActive=" + webRtcFallbackActive)
+                    }
+
+                    function recomputeRenderMode(reason) {
+                        if (!webRtcSelected) {
+                            if (webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.stop()
+                            }
+                            if (webRtcDisplayLatched) {
+                                webRtcDisplayLatched = false
+                                logRenderState(reason + ":transport-not-webrtc")
+                            }
+                            return
+                        }
+
+                        if (webRtcHealthy) {
+                            if (webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.stop()
+                            }
+                            if (!webRtcDisplayLatched) {
+                                webRtcDisplayLatched = true
+                            }
+                            logRenderState(reason + ":healthy")
+                            return
+                        }
+
+                        if (webRtcDisplayLatched && webRtcFallbackRequested) {
+                            if (!webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.start()
+                                logRenderState(reason + ":fallback-delay-start")
+                            }
+                            return
+                        }
+
+                        if (!webRtcDisplayLatched && webRtcFallbackRequested) {
+                            logRenderState(reason + ":fallback-active")
+                        }
+                    }
+
+                    Timer {
+                        id: webRtcFallbackDelayTimer
+                        interval: projectionSurface.webRtcFallbackDelayMs
+                        repeat: false
+                        running: false
+                        onTriggered: {
+                            if (projectionSurface.webRtcSelected &&
+                                projectionSurface.webRtcDisplayLatched &&
+                                projectionSurface.webRtcFallbackRequested &&
+                                !projectionSurface.webRtcHealthy) {
+                                projectionSurface.webRtcDisplayLatched = false
+                                projectionSurface.logRenderState("fallback-delay-triggered")
+                            }
+                        }
+                    }
+
+                    onWebRtcSelectedChanged: recomputeRenderMode("webRtcSelectedChanged")
+                    onWebRtcHealthyChanged: recomputeRenderMode("webRtcHealthyChanged")
+                    onWebRtcFallbackRequestedChanged: recomputeRenderMode("webRtcFallbackRequestedChanged")
+                    onWebRtcDisplayLatchedChanged: logRenderState("webRtcDisplayLatchedChanged")
+                    Component.onCompleted: recomputeRenderMode("componentCompleted")
+
+                    Connections {
+                        target: _androidAutoWebRtcReceiver
+                        ignoreUnknownSignals: true
+
+                        function onActiveChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.activeChanged")
+                        }
+
+                        function onHealthyChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.healthyChanged")
+                        }
+
+                        function onStalledChanged() {
+                            projectionSurface.logRenderState("receiver.stalledChanged")
+                        }
+
+                        function onRecoverableErrorChanged() {
+                            projectionSurface.logRenderState("receiver.recoverableErrorChanged")
+                        }
+
+                        function onFallbackRecommendedChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.fallbackRecommendedChanged")
+                        }
+                    }
 
                     function videoContentRect() {
                         if (projectionVideoLoader.item && projectionVideoLoader.item.contentRect) {
@@ -599,6 +695,10 @@ ApplicationWindow {
                         onItemChanged: {
                             projectionSurface.updateTouchForwarderDisplaySize()
                         }
+
+                        onActiveChanged: {
+                            projectionSurface.logRenderState("projectionVideoLoader.activeChanged")
+                        }
                     }
 
                     Connections {
@@ -620,10 +720,14 @@ ApplicationWindow {
                         // Keep the frame swap synchronous so the inline projection
                         // surface does not flash between successive video frames.
                         asynchronous: false
-                        visible: (!projectionSurface.webRtcActive || projectionSurface.webRtcFallbackActive) && source !== ""
+                        visible: !projectionSurface.webRtcActive && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
+
+                        onVisibleChanged: {
+                            projectionSurface.logRenderState("projectionImage.visibleChanged")
+                        }
                     }
 
                     // Note: onProjectionFrameChanged is intentionally NOT connected here.
