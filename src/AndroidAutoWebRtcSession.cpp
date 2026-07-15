@@ -20,18 +20,25 @@
 #include "AndroidAutoWebRtcSession.h"
 
 #include "AndroidAutoFacade.h"
+#include "Logger.h"
 
 namespace {
 constexpr auto kStateIdle = "idle";
 constexpr auto kStateHaveRemoteOffer = "have-remote-offer";
 constexpr auto kStateLocalAnswerSent = "local-answer-sent";
 constexpr auto kStateRemoteIceCandidateReceived = "remote-ice-candidate-received";
+constexpr int kOfferWatchdogTimeoutMs = 1500;
 }
 
 AndroidAutoWebRtcSession::AndroidAutoWebRtcSession(AndroidAutoFacade* androidAutoFacade,
                                                    QObject* parent)
         : QObject(parent), m_androidAutoFacade(androidAutoFacade),
             m_signalingState(QString::fromLatin1(kStateIdle)) {
+    m_offerWatchdogTimer.setSingleShot(true);
+    m_offerWatchdogTimer.setInterval(kOfferWatchdogTimeoutMs);
+    connect(&m_offerWatchdogTimer, &QTimer::timeout, this,
+            &AndroidAutoWebRtcSession::onOfferWatchdogTimeout);
+
     if (!m_androidAutoFacade) {
         setLastError(QStringLiteral("AndroidAutoFacade is required for WebRTC session"));
         return;
@@ -96,6 +103,8 @@ void AndroidAutoWebRtcSession::sendIceCandidate(const QString& candidate, int sd
 
 void AndroidAutoWebRtcSession::resetSession() {
     const bool hadOffer = !m_remoteOfferSdp.isEmpty();
+    disarmOfferWatchdog();
+    m_renegotiationRequested = false;
     m_remoteOfferSdp.clear();
     if (hadOffer) {
         emit remoteOfferSdpChanged(m_remoteOfferSdp);
@@ -118,6 +127,12 @@ void AndroidAutoWebRtcSession::onWebRtcSignalingReceived(const QString& topic,
             setLastError(QStringLiteral("Received WebRTC offer without SDP"));
             return;
         }
+
+        disarmOfferWatchdog();
+        m_renegotiationRequested = false;
+        Logger::instance().infoContext(
+            "AndroidAutoWebRtcSession",
+            QString("Received remote WebRTC offer (sdp_length=%1)").arg(sdp.size()));
 
         if (m_remoteOfferSdp != sdp) {
             m_remoteOfferSdp = sdp;
@@ -154,6 +169,19 @@ void AndroidAutoWebRtcSession::setActive(bool active) {
 
     m_active = active;
     emit activeChanged(m_active);
+
+    if (m_active) {
+        Logger::instance().infoContext(
+            "AndroidAutoWebRtcSession",
+            QString("WebRTC session became active (state=%1, hasOffer=%2)")
+                .arg(m_signalingState)
+                .arg(m_remoteOfferSdp.isEmpty() ? QStringLiteral("false") : QStringLiteral("true")));
+        if (m_remoteOfferSdp.isEmpty()) {
+            armOfferWatchdog();
+        }
+    } else {
+        disarmOfferWatchdog();
+    }
 }
 
 void AndroidAutoWebRtcSession::setSignalingState(const QString& state) {
@@ -172,4 +200,36 @@ void AndroidAutoWebRtcSession::setLastError(const QString& error) {
 
     m_lastError = error;
     emit lastErrorChanged(m_lastError);
+}
+
+void AndroidAutoWebRtcSession::armOfferWatchdog() {
+    if (!m_active || !m_remoteOfferSdp.isEmpty()) {
+        return;
+    }
+
+    if (!m_offerWatchdogTimer.isActive()) {
+        Logger::instance().warningContext(
+            "AndroidAutoWebRtcSession",
+            QString("Arming WebRTC offer watchdog (%1 ms) while waiting for remote offer")
+                .arg(kOfferWatchdogTimeoutMs));
+        m_offerWatchdogTimer.start();
+    }
+}
+
+void AndroidAutoWebRtcSession::disarmOfferWatchdog() {
+    if (m_offerWatchdogTimer.isActive()) {
+        m_offerWatchdogTimer.stop();
+    }
+}
+
+void AndroidAutoWebRtcSession::onOfferWatchdogTimeout() {
+    if (!m_active || !m_remoteOfferSdp.isEmpty() || m_renegotiationRequested || !m_androidAutoFacade) {
+        return;
+    }
+
+    m_renegotiationRequested = true;
+    Logger::instance().warningContext(
+        "AndroidAutoWebRtcSession",
+        "No remote WebRTC offer received after activation; requesting renegotiation");
+    m_androidAutoFacade->requestRenegotiation();
 }
