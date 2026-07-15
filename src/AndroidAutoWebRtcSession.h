@@ -20,6 +20,7 @@
 #pragma once
 
 #include <QObject>
+#include <QTimer>
 #include <QString>
 #include <QVariantMap>
 
@@ -60,18 +61,23 @@ private slots:
     void onVideoTransportModeChanged(const QString& mode);
     void onWebRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void onConnectionStateChanged(int state);
+    void onOfferWatchdogTimeout();
 
 private:
     void setActive(bool active);
     void setSignalingState(const QString& state);
     void setLastError(const QString& error);
     void refreshActiveState();
+    void armOfferWatchdog();
+    void disarmOfferWatchdog();
 
     AndroidAutoFacade* m_androidAutoFacade;
     bool m_active{false};
     bool m_transportModeWebRtc{false};
     bool m_connectionReady{false};
+    bool m_renegotiationRequested{false};
     QString m_signalingState;
     QString m_remoteOfferSdp;
     QString m_lastError;
+    QTimer m_offerWatchdogTimer;
 };

@@ -172,6 +172,24 @@ auto AndroidAutoFacade::sendWebRtcSignalingMessage(const QString& topic, const Q
     aaService->publish(topic, QJsonObject::fromVariantMap(payload));
 }
 
+auto AndroidAutoFacade::requestRenegotiation(int relaunchDelayMs) -> void {
+    auto* aaService = m_serviceProvider->androidAutoService();
+    if (!aaService) {
+        reportError("AndroidAuto service not available");
+        return;
+    }
+
+    const int boundedDelayMs = qBound(1500, relaunchDelayMs, 30000);
+    Logger::instance().warningContext(
+        "AndroidAutoFacade",
+        QString("Requesting Android Auto renegotiation (relaunch_delay_ms=%1)")
+            .arg(boundedDelayMs));
+
+    aaService->publish(
+        QStringLiteral("android-auto/renegotiate"),
+        QJsonObject{{QStringLiteral("relaunch_delay_ms"), boundedDelayMs}});
+}
+
 auto AndroidAutoFacade::retryConnection() -> void {
     Logger::instance().infoContext("AndroidAutoFacade", "Retrying connection");
 

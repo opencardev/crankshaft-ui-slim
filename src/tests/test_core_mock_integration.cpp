@@ -306,6 +306,22 @@ private slots:
                  QStringLiteral("android-auto/webrtc/ice-candidate"));
     }
 
+    void testWebRtcSessionRequestsRenegotiationWhenOfferIsMissed() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        AndroidAutoWebRtcSession session(&facade);
+
+        facade.connectToDevice(QStringLiteral("pixel-mock"));
+        QTRY_COMPARE(facade.connectionState(), static_cast<int>(AndroidAutoFacade::Connected));
+
+        m_mockCoreClient->emitVideoTransportMode(QStringLiteral("webrtc"));
+        QTRY_VERIFY(session.active());
+
+        QTRY_VERIFY_WITH_TIMEOUT(m_mockCoreClient->publishCalls >= 1, 2500);
+        QCOMPARE(m_mockCoreClient->publishedTopics.last(), QStringLiteral("android-auto/renegotiate"));
+        QCOMPARE(m_mockCoreClient->publishedPayloads.last().value(QStringLiteral("relaunch_delay_ms")).toInt(), 2500);
+    }
+
     void testChannelStatusIgnoresTransientFalseReadinessWhenConnected() {
         CoreClient client;
 
