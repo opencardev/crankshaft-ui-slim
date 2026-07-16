@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QSize>
@@ -88,6 +89,7 @@ private:
     auto advanceCandidate() -> void;
     auto connectToCore() -> void;
     auto subscribeToTopics() -> void;
+    auto sendClientHello() -> void;
     auto parseAndHandleEvent(const QJsonDocument& doc) -> void;
 
     ConnectionState m_state = ConnectionState::Disconnected;
@@ -109,5 +111,11 @@ private:
     QString m_videoTransportMode;
     QString m_videoTransportRequestedMode;
     QString m_videoTransportFallbackReason;
+    QString m_clientKind = QStringLiteral("ui-slim");
+    QString m_clientVersion = QStringLiteral("unknown");
+    int m_clientProtocolVersion = 1;
+    QSet<QString> m_capabilities{QStringLiteral("android_auto"), QStringLiteral("webrtc"),
+                                 QStringLiteral("touch_input"), QStringLiteral("key_input")};
+    bool m_clientHelloSent = false;
     QTimer* m_connectTimeoutTimer = nullptr;
 };
