@@ -72,6 +72,7 @@ auto CoreClient::initialize() -> bool {
     m_shutdownRequested = false;
     m_reconnectScheduled = false;
     m_hasConnected = false;
+    m_reconnectAttempt = 0;
 
     m_connectTimeoutTimer->setSingleShot(true);
     connect(m_connectTimeoutTimer, &QTimer::timeout, this, [this]() {
@@ -93,12 +94,15 @@ auto CoreClient::initialize() -> bool {
 
         if (!m_reconnectScheduled) {
             m_reconnectScheduled = true;
+            const int reconnectDelayMs = nextReconnectDelayMs();
             Logger::instance().infoContext(
                 "CoreClient",
-                QString("Scheduling reconnect after timeout in 500ms (candidate=%1/%2)")
+                QString("Scheduling reconnect after timeout in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                    .arg(reconnectDelayMs)
                     .arg(m_currentCandidateIndex + 1)
-                    .arg(m_connectionCandidates.size()));
-            QTimer::singleShot(500, this, &CoreClient::connectToCore);
+                    .arg(m_connectionCandidates.size())
+                    .arg(m_reconnectAttempt));
+            QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
         }
     });
 
@@ -111,6 +115,7 @@ auto CoreClient::initialize() -> bool {
 auto CoreClient::shutdown() -> void {
     m_shutdownRequested = true;
     m_reconnectScheduled = false;
+    m_reconnectAttempt = 0;
     if (m_connectTimeoutTimer) {
         m_connectTimeoutTimer->stop();
     }
@@ -443,6 +448,7 @@ void CoreClient::onWebSocketConnected() {
     m_isConnecting = false;
     m_hasConnected = true;
     m_reconnectScheduled = false;
+    m_reconnectAttempt = 0;
     m_clientHelloSent = false;
     sendClientHello();
     subscribeToTopics();
@@ -488,12 +494,15 @@ void CoreClient::onWebSocketDisconnected() {
 
     if (!m_shutdownRequested && !m_reconnectScheduled) {
         m_reconnectScheduled = true;
+        const int reconnectDelayMs = nextReconnectDelayMs();
         Logger::instance().infoContext(
             "CoreClient",
-            QString("Scheduling reconnect after disconnect in 2000ms (candidate=%1/%2)")
+            QString("Scheduling reconnect after disconnect in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                .arg(reconnectDelayMs)
                 .arg(m_currentCandidateIndex + 1)
-                .arg(m_connectionCandidates.size()));
-        QTimer::singleShot(2000, this, &CoreClient::connectToCore);
+                .arg(m_connectionCandidates.size())
+                .arg(m_reconnectAttempt));
+        QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
     }
 }
 
@@ -545,13 +554,29 @@ void CoreClient::onWebSocketError(QAbstractSocket::SocketError error) {
 
     if (!m_shutdownRequested && !m_reconnectScheduled) {
         m_reconnectScheduled = true;
+        const int reconnectDelayMs = nextReconnectDelayMs();
         Logger::instance().infoContext(
             "CoreClient",
-            QString("Scheduling reconnect after socket error in 2000ms (candidate=%1/%2)")
+            QString("Scheduling reconnect after socket error in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                .arg(reconnectDelayMs)
                 .arg(m_currentCandidateIndex + 1)
-                .arg(m_connectionCandidates.size()));
-        QTimer::singleShot(2000, this, &CoreClient::connectToCore);
+                .arg(m_connectionCandidates.size())
+                .arg(m_reconnectAttempt));
+        QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
     }
+}
+
+auto CoreClient::nextReconnectDelayMs() -> int {
+    const int cappedAttempt = qBound(0, m_reconnectAttempt, 7);
+    const int delayMs = qBound(500, 500 * (1 << cappedAttempt), 30000);
+    m_reconnectAttempt = qMin(m_reconnectAttempt + 1, 8);
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastReconnectLogMs == 0 || (nowMs - m_lastReconnectLogMs) > 30000) {
+        m_lastReconnectLogMs = nowMs;
+    }
+
+    return delayMs;
 }
 
 void CoreClient::onWebSocketTextReceived(const QString& message) {
