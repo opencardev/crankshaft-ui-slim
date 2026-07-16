@@ -22,6 +22,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QCoreApplication>
 #include <QUrl>
 #include <QTimer>
 
@@ -53,7 +54,12 @@ auto socketStateToString(QAbstractSocket::SocketState state) -> QString {
 CoreClient::CoreClient(QObject* parent)
         : QObject(parent),
             m_primaryCoreUrl(m_coreUrl),
-            m_connectTimeoutTimer(new QTimer(this)) {}
+            m_connectTimeoutTimer(new QTimer(this)) {
+    const QString runtimeVersion = QCoreApplication::applicationVersion().trimmed();
+    if (!runtimeVersion.isEmpty()) {
+        m_clientVersion = runtimeVersion;
+    }
+}
 
 CoreClient::~CoreClient() {
     if (m_webSocket) {
@@ -257,6 +263,39 @@ auto CoreClient::subscribeToTopics() -> void {
                                    "Subscribed to android-auto/status/*, android-auto/media/*, android-auto/webrtc/*, bluetooth/#");
 }
 
+auto CoreClient::sendClientHello() -> void {
+    if (!m_webSocket || m_webSocket->state() != QAbstractSocket::ConnectedState) {
+        Logger::instance().warningContext("CoreClient", "Cannot send client hello: WebSocket not connected");
+        return;
+    }
+
+    QJsonArray caps;
+    for (const QString& capability : m_capabilities) {
+        caps.append(capability);
+    }
+
+    QJsonObject payload;
+    payload["client_kind"] = m_clientKind;
+    payload["client_version"] = m_clientVersion;
+    payload["client_protocol_version"] = m_clientProtocolVersion;
+    payload["capabilities"] = caps;
+
+    QJsonObject helloMessage;
+    helloMessage["type"] = "client_hello";
+    helloMessage["payload"] = payload;
+
+    m_webSocket->sendTextMessage(QJsonDocument(helloMessage).toJson(QJsonDocument::Compact));
+    m_clientHelloSent = true;
+
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("Sent client hello (kind=%1 version=%2 protocol=%3 capabilities=%4)")
+            .arg(m_clientKind)
+            .arg(m_clientVersion)
+            .arg(m_clientProtocolVersion)
+            .arg(QStringList(m_capabilities.values()).join(",")));
+}
+
 auto CoreClient::publish(const QString& topic, const QJsonObject& payload) -> void {
     if (!m_webSocket || m_webSocket->state() != QAbstractSocket::ConnectedState) {
         Logger::instance().warningContext("CoreClient",
@@ -404,6 +443,8 @@ void CoreClient::onWebSocketConnected() {
     m_isConnecting = false;
     m_hasConnected = true;
     m_reconnectScheduled = false;
+    m_clientHelloSent = false;
+    sendClientHello();
     subscribeToTopics();
 }
 
