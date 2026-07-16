@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QDateTime>
 #include <QSet>
 #include <QString>
 #include <QTimer>
@@ -104,6 +105,8 @@ private:
     bool m_hasConnected = false;
     bool m_reconnectScheduled = false;
     bool m_ignoreNextDisconnectFromAbort = false;
+    int m_reconnectAttempt = 0;
+    qint64 m_lastReconnectLogMs = 0;
     bool m_hasLoggedFirstVideoFrame = false;
     bool m_projectionReady = false;
     bool m_videoReady = false;
@@ -118,4 +121,6 @@ private:
                                  QStringLiteral("touch_input"), QStringLiteral("key_input")};
     bool m_clientHelloSent = false;
     QTimer* m_connectTimeoutTimer = nullptr;
+
+    [[nodiscard]] auto nextReconnectDelayMs() -> int;
 };
