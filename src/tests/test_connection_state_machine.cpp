@@ -31,6 +31,12 @@ class MockCoreClient : public CoreClient {
 public:
     explicit MockCoreClient(QObject* parent = nullptr) : CoreClient(parent) {}
 
+    auto emitConnectionState(CoreClient::ConnectionState state) -> void {
+        emit connectionStateChanged(static_cast<int>(state));
+    }
+
+    auto emitConnectionError(const QString& reason) -> void { emit connectionError(reason); }
+
     [[nodiscard]] auto initialize() -> bool override {
         emit connectionStateChanged(static_cast<int>(CoreClient::ConnectionState::Disconnected));
         return true;
@@ -71,15 +77,21 @@ public:
 class ConnectionStateMachineTest : public QObject {
     Q_OBJECT
 
+    MockCoreClient* m_mockCoreClient = nullptr;
+
 private slots:
     void init() {
         auto& services = ServiceProvider::instance();
         services.shutdown();
         QVERIFY(services.initialize());
-        services.injectCoreClientForTesting(std::make_unique<MockCoreClient>());
+        m_mockCoreClient = new MockCoreClient();
+        services.injectCoreClientForTesting(std::unique_ptr<CoreClient>(m_mockCoreClient));
     }
 
-    void cleanup() { ServiceProvider::instance().shutdown(); }
+    void cleanup() {
+        ServiceProvider::instance().shutdown();
+        m_mockCoreClient = nullptr;
+    }
 
     void testSuccessfulConnectionPath() {
         auto& services = ServiceProvider::instance();
@@ -91,6 +103,104 @@ private slots:
 
         QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
         QCOMPARE(machine.retryCount(), 0);
+        QCOMPARE(machine.lastError(), QString());
+    }
+
+    void testConnectedDropWithinGraceDoesNotError() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        ConnectionStateMachine machine(&facade);
+
+        QSignalSpy retrySpy(&machine, &ConnectionStateMachine::retryingChanged);
+        QSignalSpy maxRetriesSpy(&machine, &ConnectionStateMachine::maxRetriesReached);
+
+        machine.startConnection();
+        facade.connectToDevice(QStringLiteral("device-1"));
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+
+        QVERIFY(m_mockCoreClient != nullptr);
+        m_mockCoreClient->emitConnectionState(CoreClient::ConnectionState::Disconnected);
+        QTest::qWait(120);
+        m_mockCoreClient->emitConnectionState(CoreClient::ConnectionState::Connecting);
+        QTest::qWait(40);
+        m_mockCoreClient->emitConnectionState(CoreClient::ConnectionState::Connected);
+
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+        QCOMPARE(machine.lastError(), QString());
+        QCOMPARE(maxRetriesSpy.count(), 0);
+        QCOMPARE(machine.isRetrying(), false);
+        QVERIFY(retrySpy.isEmpty());
+    }
+
+    void testConnectedDropBeyondGraceTriggersErrorAndRetry() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        ConnectionStateMachine machine(&facade);
+
+        QSignalSpy retrySpy(&machine, &ConnectionStateMachine::retryingChanged);
+
+        machine.startConnection();
+        facade.connectToDevice(QStringLiteral("device-1"));
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+
+        QVERIFY(m_mockCoreClient != nullptr);
+        m_mockCoreClient->emitConnectionState(CoreClient::ConnectionState::Disconnected);
+
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Error));
+        QCOMPARE(machine.lastError(), QStringLiteral("Lost connection to crankshaft-core service"));
+        QTRY_VERIFY(machine.isRetrying());
+        QVERIFY(!retrySpy.isEmpty());
+    }
+
+    void testIntentionalStopIgnoresFacadeFailureSignal() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        ConnectionStateMachine machine(&facade);
+
+        machine.startConnection();
+        facade.connectToDevice(QStringLiteral("device-3"));
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+
+        machine.stopConnection();
+        QVERIFY(m_mockCoreClient != nullptr);
+        m_mockCoreClient->emitConnectionError(QStringLiteral("disconnect cleanup failure"));
+
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Disconnected));
+        QCOMPARE(machine.lastError(), QString());
+        QCOMPARE(machine.isRetrying(), false);
+    }
+
+    void testExplicitFailureOverridesGraceImmediately() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        ConnectionStateMachine machine(&facade);
+
+        machine.startConnection();
+        facade.connectToDevice(QStringLiteral("device-1"));
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+
+        QVERIFY(m_mockCoreClient != nullptr);
+        m_mockCoreClient->emitConnectionState(CoreClient::ConnectionState::Disconnected);
+        m_mockCoreClient->emitConnectionError(QStringLiteral("Core handshake failed"));
+
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Error));
+        QCOMPARE(machine.lastError(), QStringLiteral("Core handshake failed"));
+    }
+
+    void testIntentionalStopBypassesLostCoreError() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        ConnectionStateMachine machine(&facade);
+
+        machine.startConnection();
+        facade.connectToDevice(QStringLiteral("device-2"));
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Connected));
+
+        machine.stopConnection();
+
+        QTRY_COMPARE(machine.currentState(), static_cast<int>(ConnectionStateMachine::Disconnected));
+        QCOMPARE(machine.lastError(), QString());
+        QCOMPARE(machine.isRetrying(), false);
     }
 
     void testErrorTriggersRetry() {
