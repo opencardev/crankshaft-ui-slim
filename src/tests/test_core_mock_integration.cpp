@@ -394,6 +394,38 @@ private slots:
         QCOMPARE(transportSpy.at(0).at(0).toString(), QStringLiteral("webrtc"));
     }
 
+    void testDisconnectDefersProjectionTeardownBriefly() {
+        CoreClient client;
+
+        QSignalSpy projectionSpy(&client, &CoreClient::projectionReadyChanged);
+        QSignalSpy videoSpy(&client, &CoreClient::videoStateChanged);
+
+        const QString readyMessage = QStringLiteral(
+            R"({"type":"event","topic":"android-auto/status/channel-status","payload":{"connection_state_name":"CONNECTED","projection_ready":true,"video_ready":true,"media_audio_ready":true,"video_transport_mode":"webrtc","video_transport_requested":"webrtc","video_transport_fallback_reason":"","reason":"steady"}})"
+        );
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketTextReceived",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QString, readyMessage)));
+        QCOMPARE(projectionSpy.count(), 1);
+        QCOMPARE(videoSpy.count(), 1);
+
+        QVERIFY(QMetaObject::invokeMethod(&client, "onWebSocketDisconnected",
+                                          Qt::DirectConnection));
+
+        // During transient hold we should not emit immediate false transitions.
+        QTest::qWait(200);
+        QCOMPARE(projectionSpy.count(), 1);
+        QCOMPARE(videoSpy.count(), 1);
+
+        // After hold expiry, teardown signals should be emitted.
+        QTest::qWait(1600);
+        QCOMPARE(projectionSpy.count(), 2);
+        QCOMPARE(videoSpy.count(), 2);
+        QCOMPARE(projectionSpy.last().at(0).toBool(), false);
+        QCOMPARE(videoSpy.last().at(0).toBool(), false);
+    }
+
 private:
     MockCoreClient* m_mockCoreClient = nullptr;
 };

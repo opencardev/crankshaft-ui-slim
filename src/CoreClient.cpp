@@ -54,11 +54,23 @@ auto socketStateToString(QAbstractSocket::SocketState state) -> QString {
 CoreClient::CoreClient(QObject* parent)
         : QObject(parent),
             m_primaryCoreUrl(m_coreUrl),
-            m_connectTimeoutTimer(new QTimer(this)) {
+            m_connectTimeoutTimer(new QTimer(this)),
+            m_transientDisconnectHoldTimer(new QTimer(this)) {
     const QString runtimeVersion = QCoreApplication::applicationVersion().trimmed();
     if (!runtimeVersion.isEmpty()) {
         m_clientVersion = runtimeVersion;
     }
+
+    m_transientDisconnectHoldTimer->setSingleShot(true);
+    connect(m_transientDisconnectHoldTimer, &QTimer::timeout, this, [this]() {
+        m_transientDisconnectHoldActive = false;
+        if (m_shutdownRequested ||
+            (m_webSocket && m_webSocket->state() == QAbstractSocket::ConnectedState)) {
+            return;
+        }
+
+        clearProjectionState(/*emitSignals=*/true, /*clearTransportMode=*/true);
+    });
 }
 
 CoreClient::~CoreClient() {
@@ -116,6 +128,10 @@ auto CoreClient::shutdown() -> void {
     m_shutdownRequested = true;
     m_reconnectScheduled = false;
     m_reconnectAttempt = 0;
+    m_transientDisconnectHoldActive = false;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->stop();
+    }
     if (m_connectTimeoutTimer) {
         m_connectTimeoutTimer->stop();
     }
@@ -124,12 +140,7 @@ auto CoreClient::shutdown() -> void {
         m_webSocket->close();
     }
     emit connectedDeviceChanged(QString());
-    emit audioStateChanged(false);
-    emit videoStateChanged(false);
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    emit projectionReadyChanged(false);
+    clearProjectionState(/*emitSignals=*/true, /*clearTransportMode=*/true);
     Logger::instance().infoContext("CoreClient", "Shutdown WebSocket core client");
 }
 
@@ -449,6 +460,10 @@ void CoreClient::onWebSocketConnected() {
     m_hasConnected = true;
     m_reconnectScheduled = false;
     m_reconnectAttempt = 0;
+    m_transientDisconnectHoldActive = false;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->stop();
+    }
     m_clientHelloSent = false;
     sendClientHello();
     subscribeToTopics();
@@ -481,16 +496,10 @@ void CoreClient::onWebSocketDisconnected() {
         m_connectTimeoutTimer->stop();
     }
     m_isConnecting = false;
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    if (!m_videoTransportMode.isEmpty()) {
-        m_videoTransportMode.clear();
-        emit videoTransportModeChanged(m_videoTransportMode);
+    m_transientDisconnectHoldActive = true;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->start(m_transientDisconnectHoldMs);
     }
-    emit projectionReadyChanged(false);
-    emit videoStateChanged(false);
-    emit audioStateChanged(false);
 
     if (!m_shutdownRequested && !m_reconnectScheduled) {
         m_reconnectScheduled = true;
@@ -512,16 +521,10 @@ void CoreClient::onWebSocketError(QAbstractSocket::SocketError error) {
     if (m_connectTimeoutTimer) {
         m_connectTimeoutTimer->stop();
     }
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    if (!m_videoTransportMode.isEmpty()) {
-        m_videoTransportMode.clear();
-        emit videoTransportModeChanged(m_videoTransportMode);
+    m_transientDisconnectHoldActive = true;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->start(m_transientDisconnectHoldMs);
     }
-    emit projectionReadyChanged(false);
-    emit videoStateChanged(false);
-    emit audioStateChanged(false);
 
     QString errorMsg;
     switch (error) {
@@ -577,6 +580,37 @@ auto CoreClient::nextReconnectDelayMs() -> int {
     }
 
     return delayMs;
+}
+
+auto CoreClient::clearProjectionState(bool emitSignals, bool clearTransportMode) -> void {
+    const bool projectionChanged = m_projectionReady;
+    const bool videoChanged = m_videoReady;
+    const bool audioChanged = m_audioReady;
+
+    m_projectionReady = false;
+    m_videoReady = false;
+    m_audioReady = false;
+
+    if (clearTransportMode && !m_videoTransportMode.isEmpty()) {
+        m_videoTransportMode.clear();
+        if (emitSignals) {
+            emit videoTransportModeChanged(m_videoTransportMode);
+        }
+    }
+
+    if (!emitSignals) {
+        return;
+    }
+
+    if (projectionChanged) {
+        emit projectionReadyChanged(false);
+    }
+    if (videoChanged) {
+        emit videoStateChanged(false);
+    }
+    if (audioChanged) {
+        emit audioStateChanged(false);
+    }
 }
 
 void CoreClient::onWebSocketTextReceived(const QString& message) {
@@ -637,6 +671,10 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             emit connectedDeviceChanged(serialNumber);
 
         } else if (topic == "android-auto/status/disconnected") {
+            m_transientDisconnectHoldActive = false;
+            if (m_transientDisconnectHoldTimer) {
+                m_transientDisconnectHoldTimer->stop();
+            }
             m_projectionReady = false;
             m_videoReady = false;
             m_audioReady = false;
@@ -650,6 +688,10 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
         } else if (topic == "android-auto/status/error") {
             QString errorMsg = payload.value("error").toString("Unknown error");
             Logger::instance().errorContext("CoreClient", QString("Core error: %1").arg(errorMsg));
+            m_transientDisconnectHoldActive = false;
+            if (m_transientDisconnectHoldTimer) {
+                m_transientDisconnectHoldTimer->stop();
+            }
             m_projectionReady = false;
             m_videoReady = false;
             m_audioReady = false;
@@ -682,6 +724,14 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                     : reportedVideoTransportRequestedMode.trimmed().toLower();
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
+
+            if ((newProjectionReady || newVideoReady || newAudioReady || coreReportsConnected) &&
+                m_transientDisconnectHoldActive) {
+                m_transientDisconnectHoldActive = false;
+                if (m_transientDisconnectHoldTimer) {
+                    m_transientDisconnectHoldTimer->stop();
+                }
+            }
 
             m_videoTransportRequestedMode = newVideoTransportRequestedMode;
             m_videoTransportFallbackReason = reportedVideoTransportFallbackReason.trimmed();
