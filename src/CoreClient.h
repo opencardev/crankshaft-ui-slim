@@ -105,6 +105,7 @@ private:
     bool m_hasConnected = false;
     bool m_reconnectScheduled = false;
     bool m_ignoreNextDisconnectFromAbort = false;
+    bool m_transientDisconnectHoldActive = false;
     int m_reconnectAttempt = 0;
     qint64 m_lastReconnectLogMs = 0;
     bool m_hasLoggedFirstVideoFrame = false;
@@ -121,6 +122,9 @@ private:
                                  QStringLiteral("touch_input"), QStringLiteral("key_input")};
     bool m_clientHelloSent = false;
     QTimer* m_connectTimeoutTimer = nullptr;
+    QTimer* m_transientDisconnectHoldTimer = nullptr;
+    int m_transientDisconnectHoldMs = 1500;
 
     [[nodiscard]] auto nextReconnectDelayMs() -> int;
+    auto clearProjectionState(bool emitSignals, bool clearTransportMode) -> void;
 };
