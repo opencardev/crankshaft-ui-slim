@@ -172,19 +172,16 @@ auto ConnectionStateMachine::onFacadeConnectionStateChanged(int state) -> void {
                                         "Ignoring disconnected escalation during intentional stop");
         cancelConnectedDropGrace();
         transitionToState(State::Disconnected);
-        m_intentionalStopInProgress = false;
         return;
     }
 
     if (newState == State::Connecting || newState == State::Connected) {
         cancelConnectedDropGrace();
-        m_intentionalStopInProgress = false;
     }
 
     // If core/service drops while previously connected, require sustained drop before escalation.
     if (m_currentState == State::Connected && newState == State::Disconnected) {
         startConnectedDropGrace();
-        transitionToState(State::Disconnected);
         return;
     }
 
