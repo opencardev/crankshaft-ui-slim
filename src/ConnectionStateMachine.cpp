@@ -176,7 +176,14 @@ auto ConnectionStateMachine::onFacadeConnectionStateChanged(int state) -> void {
     }
 
     if (newState == State::Connecting || newState == State::Connected) {
+        const bool wasGracePending = m_connectedDropGracePending;
         cancelConnectedDropGrace();
+
+        // During provisional-drop recovery keep current state as Connected; avoid
+        // invalid Connected -> Connecting transitions while grace is active.
+        if (wasGracePending && newState == State::Connecting) {
+            return;
+        }
     }
 
     // If core/service drops while previously connected, require sustained drop before escalation.
@@ -404,8 +411,9 @@ auto ConnectionStateMachine::calculateRetryDelay() const -> int {
 }
 
 auto ConnectionStateMachine::startConnectedDropGrace() -> void {
-    if (m_connectedDropGraceTimer->isActive()) {
-        m_connectedDropGraceTimer->stop();
+    if (m_connectedDropGracePending) {
+        // Keep a single bounded grace window across repeated disconnect signals.
+        return;
     }
 
     m_connectedDropGracePending = true;
