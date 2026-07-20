@@ -19,6 +19,7 @@
 
 #include "ConnectionStateMachine.h"
 
+#include <QTimer>
 #include <QtMath>
 
 #include "AndroidAutoFacade.h"
@@ -33,13 +34,13 @@ ConnectionStateMachine::ConnectionStateMachine(AndroidAutoFacade* androidAutoFac
       m_nextRetryDelay(INITIAL_RETRY_DELAY_MS),
       m_lastError(),
       m_lastTransitionTime(QDateTime::currentDateTime()),
-      m_retryTimer(new QTimer(this)),
-    m_connectionTimeout(new QTimer(this)),
-    m_connectedDropGraceTimer(new QTimer(this)),
-    m_connectionTimeoutDeadline(),
-    m_connectedDropGraceDeadline(),
-    m_connectedDropGracePending(false),
-    m_intentionalStopInProgress(false) {
+            m_retryTimer(new QTimer(this)),
+            m_connectionTimeout(new QTimer(this)),
+            m_connectedDropGraceTimer(new QTimer(this)),
+            m_connectionTimeoutDeadline(),
+            m_connectedDropGraceDeadline(),
+            m_connectedDropGracePending(false),
+            m_intentionalStopInProgress(false) {
     if (!m_androidAutoFacade) {
         Logger::instance().errorContext("ConnectionStateMachine", "AndroidAutoFacade is null");
         return;
@@ -54,9 +55,10 @@ ConnectionStateMachine::ConnectionStateMachine(AndroidAutoFacade* androidAutoFac
     connect(m_connectionTimeout, &QTimer::timeout, this,
             &ConnectionStateMachine::onConnectionTimeout);
 
-        // Setup connected-drop grace timer
-        m_connectedDropGraceTimer->setSingleShot(true);
-        connect(m_connectedDropGraceTimer, &QTimer::timeout, this,
+    // Setup connected-drop grace timer
+    m_connectedDropGraceTimer->setSingleShot(true);
+    m_connectedDropGraceTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_connectedDropGraceTimer, &QTimer::timeout, this,
             &ConnectionStateMachine::onConnectedDropGraceTimeout);
 
     // Connect to facade signals
@@ -295,17 +297,21 @@ auto ConnectionStateMachine::onConnectedDropGraceTimeout() -> void {
         return;
     }
 
-    m_connectedDropGracePending = false;
-
     const QDateTime now = QDateTime::currentDateTime();
-    if (m_connectedDropGraceDeadline.isValid() && now < m_connectedDropGraceDeadline.addMSecs(-25)) {
+    if (m_connectedDropGraceDeadline.isValid() && now < m_connectedDropGraceDeadline) {
+        const qint64 remainingMs = now.msecsTo(m_connectedDropGraceDeadline);
+        // Re-arm to avoid losing escalation when timer callbacks arrive early.
+        m_connectedDropGraceTimer->start(static_cast<int>(qMax<qint64>(1, remainingMs)));
         Logger::instance().debugContext(
             "ConnectionStateMachine",
-            QString("Ignoring early connected-drop timeout (now=%1, deadline=%2)")
+            QString("Re-arming early connected-drop timeout (remaining=%1ms, now=%2, deadline=%3)")
+                .arg(remainingMs)
                 .arg(now.toString(Qt::ISODateWithMs))
                 .arg(m_connectedDropGraceDeadline.toString(Qt::ISODateWithMs)));
         return;
     }
+
+    m_connectedDropGracePending = false;
 
     if (!m_androidAutoFacade) {
         return;
