@@ -19,8 +19,8 @@
 
 #include "ConnectionStateMachine.h"
 
+#include <QTimer>
 #include <QtMath>
-#include <QtTimer>
 
 #include "AndroidAutoFacade.h"
 #include "Logger.h"
