@@ -113,6 +113,9 @@ private:
     qint64 m_lastFrameTimestampMs{0};
     QString m_lastError;
     QTimer m_frameStallTimer;
+    quint64 m_frameReceivedCount{0};
+    qint64 m_firstFrameTimestampMs{0};
+    qint64 m_lastFrameDeltaMs{0};
 
 #if CRANKSHAFT_UI_GSTREAMER_WEBRTC
     struct _GstElement* m_pipeline{nullptr};
