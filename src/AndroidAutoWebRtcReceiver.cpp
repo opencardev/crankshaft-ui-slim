@@ -111,6 +111,9 @@ void AndroidAutoWebRtcReceiver::onSessionActiveChanged(bool active) {
         setStalled(false);
         setRecoverableError(false);
         setLastFrameTimestampMs(0);
+        m_frameReceivedCount = 0;
+        m_firstFrameTimestampMs = 0;
+        m_lastFrameDeltaMs = 0;
         teardownPipeline();
         if (m_renderer) {
             m_renderer->clear();
@@ -255,11 +258,29 @@ void AndroidAutoWebRtcReceiver::markFrameReceived() {
     }
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_firstFrameTimestampMs == 0) {
+        m_firstFrameTimestampMs = nowMs;
+    }
+
+    if (m_lastFrameTimestampMs > 0) {
+        m_lastFrameDeltaMs = nowMs - m_lastFrameTimestampMs;
+    }
+
+    m_frameReceivedCount++;
     setLastFrameTimestampMs(nowMs);
     setStalled(false);
     setRecoverableError(false);
     setHealthy(true);
     m_frameStallTimer.start();
+
+    if (m_frameReceivedCount == 1 || (m_frameReceivedCount % 120) == 0) {
+        Logger::instance().debugContext(
+            "AndroidAutoWebRtcReceiver",
+            QString("frame_flow sample=%1 delta_ms=%2 first_frame_age_ms=%3")
+                .arg(m_frameReceivedCount)
+                .arg(m_lastFrameDeltaMs)
+                .arg(nowMs - m_firstFrameTimestampMs));
+    }
 }
 
 void AndroidAutoWebRtcReceiver::onFrameStallTimeout() {
