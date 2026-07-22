@@ -67,7 +67,7 @@ Item {
 
         var mappedWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
             ? projectionVideoOutput.contentRect.width
-            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : width)
+            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
         var mappedHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
             ? projectionVideoOutput.contentRect.height
             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height)
