@@ -9,6 +9,7 @@ SOURCE_DIR="${SOURCE_DIR:-src}"
 JOBS="${JOBS:-$(nproc)}"
 CLEAN="${CLEAN:-OFF}"
 INSTALL_DEPS="${INSTALL_DEPS:-OFF}"
+INSTALL_PACKAGE="${INSTALL_PACKAGE:-OFF}"
 CODE_QUALITY="${CODE_QUALITY:-OFF}"
 FORMAT_CHECK="${FORMAT_CHECK:-OFF}"
 VERSION="${VERSION:-}"
@@ -39,6 +40,10 @@ for arg in "$@"; do
     --install-deps)
       INSTALL_DEPS="ON"
       ;;
+    --install)
+      INSTALL_PACKAGE="ON"
+      BUILD_PACKAGE="ON"
+      ;;
     --sbom)
       BUILD_SBOM="ON"
       ;;
@@ -51,6 +56,47 @@ done
 
 log() {
   printf '[build.sh] %s\n' "$*"
+}
+
+run_as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    log "ERROR: '${1}' requires root privileges (sudo not found)"
+    exit 1
+  fi
+}
+
+install_built_package() {
+  local package_name="$1"
+  local package_dir="${BUILD_DIR}/packages"
+
+  if [[ ! -d "${package_dir}" ]]; then
+    log "ERROR: Package directory not found: ${package_dir}"
+    exit 1
+  fi
+
+  shopt -s nullglob
+  local debs=("${package_dir}"/*.deb)
+  shopt -u nullglob
+
+  if [[ ${#debs[@]} -eq 0 ]]; then
+    log "ERROR: No .deb package found in ${package_dir}. Use BUILD_PACKAGE=ON or --install."
+    exit 1
+  fi
+
+  local latest_deb
+  latest_deb="$(ls -1t "${package_dir}"/*.deb | head -n1)"
+
+  if dpkg-query -W -f='${Status}' "${package_name}" 2>/dev/null | grep -q "install ok installed"; then
+    log "Removing installed package: ${package_name}"
+    run_as_root dpkg -r "${package_name}"
+  fi
+
+  log "Installing package: ${latest_deb}"
+  run_as_root dpkg -i "${latest_deb}"
 }
 
 # ---------------------------------------------------------------------------
@@ -321,6 +367,10 @@ if [[ "${BUILD_SBOM}" == "ON" ]]; then
     exit 1
   fi
   generate_sboms
+fi
+
+if [[ "${INSTALL_PACKAGE}" == "ON" ]]; then
+  install_built_package "crankshaft-ui-slim"
 fi
 
 log "Done"

@@ -25,6 +25,12 @@ chmod +x ./build.sh
 ./build.sh --clean
 ```
 
+5. Optional local package install workflow:
+
+```bash
+./build.sh --clean --install
+```
+
 ## Branch and Commit Guidelines
 
 - Create feature branches from `main`.

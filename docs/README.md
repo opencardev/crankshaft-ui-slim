@@ -46,6 +46,17 @@ Build and package artifacts (`.deb`, `.tgz`):
 BUILD_PACKAGE=ON ./build.sh --clean
 ```
 
+Build, then replace installed ui-slim package with the newly built `.deb`:
+
+```bash
+./build.sh --clean --install
+```
+
+Notes for `--install`:
+- `--install` implies `BUILD_PACKAGE=ON`.
+- `build.sh` removes any installed `crankshaft-ui-slim` package first, then installs the newest `.deb` from `${BUILD_DIR}/packages`.
+- Installing packages requires root privileges (uses `sudo` when needed).
+
 Run code quality and format checks:
 
 ```bash
