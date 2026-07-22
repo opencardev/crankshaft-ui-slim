@@ -185,11 +185,11 @@ private slots:
         QVERIFY(!retrySpy.isEmpty());
     }
 
-    void testDisplayResolutionPublishingUsesScreenAwareScaling() {
+    void testDisplayResolutionPublishingUsesRenderedSize() {
         const QSize resolved = TouchEventForwarder::resolvePublishedDisplayResolution(
             QSize(1280, 720), QSize(1920, 1080), 1.5);
 
-        QCOMPARE(resolved, QSize(2880, 1620));
+        QCOMPARE(resolved, QSize(1280, 720));
     }
 
     void testTouchForwarderSendsEventsToMockedCoreClient() {

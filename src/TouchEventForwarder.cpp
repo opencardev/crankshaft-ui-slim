@@ -23,9 +23,7 @@
 #include "CoreClient.h"
 #include "Logger.h"
 #include "ServiceProvider.h"
-#include <QGuiApplication>
 #include <QJsonObject>
-#include <QScreen>
 
 TouchEventForwarder::TouchEventForwarder(AndroidAutoFacade* androidAutoFacade,
                                          ServiceProvider* serviceProvider, QObject* parent)
@@ -66,11 +64,8 @@ QSize TouchEventForwarder::displaySize() const { return m_displaySize; }
 QSize TouchEventForwarder::resolvePublishedDisplayResolution(const QSize& renderedSize,
                                                               const QSize& screenSize,
                                                               qreal devicePixelRatio) {
-    if (screenSize.isValid() && screenSize.width() > 0 && screenSize.height() > 0) {
-        const qreal ratio = qMax<qreal>(1.0, devicePixelRatio);
-        return QSize(qRound(screenSize.width() * ratio), qRound(screenSize.height() * ratio));
-    }
-
+    Q_UNUSED(screenSize);
+    Q_UNUSED(devicePixelRatio);
     return renderedSize;
 }
 
@@ -86,15 +81,7 @@ auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
             QString("Display size changed to: %1x%2").arg(size.width()).arg(size.height()));
     }
 
-    QSize screenSize;
-    qreal devicePixelRatio = 1.0;
-    if (const QScreen* screen = QGuiApplication::primaryScreen()) {
-        screenSize = screen->geometry().size();
-        devicePixelRatio = screen->devicePixelRatio();
-    }
-
-    const QSize publishedDisplayResolution =
-        resolvePublishedDisplayResolution(size, screenSize, devicePixelRatio);
+    const QSize publishedDisplayResolution = resolvePublishedDisplayResolution(size);
 
     // Only publish the display resolution to the core service when it has
     // actually changed.  Without this guard the QML onProjectionFrameChanged
