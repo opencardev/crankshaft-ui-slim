@@ -65,20 +65,63 @@ Item {
             return
         }
 
+        var geometry = projectionGeometrySnapshot()
+        if (!geometry.valid) {
+            return
+        }
+
+        touchForwarder.displaySize = Qt.size(geometry.width, geometry.height)
+
+        var aaWidth = androidAutoFacade && androidAutoFacade.projectionWidth > 0
+            ? androidAutoFacade.projectionWidth
+            : geometry.width
+        var aaHeight = androidAutoFacade && androidAutoFacade.projectionHeight > 0
+            ? androidAutoFacade.projectionHeight
+            : geometry.height
+        touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
+    }
+
+    function projectionGeometrySnapshot() {
         var mappedWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
             ? projectionVideoOutput.contentRect.width
             : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
         var mappedHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
             ? projectionVideoOutput.contentRect.height
-            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height)
-        touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
+            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
+
+        var frameLeft = webRtcActive && projectionVideoOutput.contentRect.width > 0
+            ? projectionVideoOutput.contentRect.x
+            : (projectionImage.width - mappedWidth) / 2
+        var frameTop = webRtcActive && projectionVideoOutput.contentRect.height > 0
+            ? projectionVideoOutput.contentRect.y
+            : (projectionImage.height - mappedHeight) / 2
+
+        var valid = isFinite(mappedWidth) && isFinite(mappedHeight) &&
+                    isFinite(frameLeft) && isFinite(frameTop) &&
+                    mappedWidth > 0 && mappedHeight > 0
+
+        return {
+            valid: valid,
+            width: mappedWidth,
+            height: mappedHeight,
+            left: frameLeft,
+            top: frameTop
+        }
+    }
+
+    function applyTouchForwarderGeometry(geometry) {
+        if (!touchForwarder || !geometry || !geometry.valid) {
+            return
+        }
+
+        touchForwarder.displaySize = Qt.size(geometry.width, geometry.height)
 
         var aaWidth = androidAutoFacade && androidAutoFacade.projectionWidth > 0
             ? androidAutoFacade.projectionWidth
-            : mappedWidth
+            : geometry.width
         var aaHeight = androidAutoFacade && androidAutoFacade.projectionHeight > 0
             ? androidAutoFacade.projectionHeight
-            : mappedHeight
+            : geometry.height
         touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
     }
 
@@ -90,29 +133,16 @@ Item {
     // at frame rate, causing GStreamer pipeline reconfiguration events that
     // produce visible HDMI flicker.
 
-    function mapToProjectionCoordinates(rawX, rawY) {
-        var frameWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
-            ? projectionVideoOutput.contentRect.width
-            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-        var frameHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
-            ? projectionVideoOutput.contentRect.height
-            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
-
-        if (frameWidth <= 0 || frameHeight <= 0) {
-            return { x: 0, y: 0 }
+    function mapToProjectionCoordinates(rawX, rawY, geometry) {
+        var snapshot = geometry ? geometry : projectionGeometrySnapshot()
+        if (!snapshot.valid) {
+            return { valid: false, x: 0, y: 0 }
         }
 
-        var frameLeft = webRtcActive && projectionVideoOutput.contentRect.width > 0
-            ? projectionVideoOutput.contentRect.x
-            : (projectionImage.width - frameWidth) / 2
-        var frameTop = webRtcActive && projectionVideoOutput.contentRect.height > 0
-            ? projectionVideoOutput.contentRect.y
-            : (projectionImage.height - frameHeight) / 2
+        var localX = Math.max(0, Math.min(snapshot.width - 1, rawX - snapshot.left))
+        var localY = Math.max(0, Math.min(snapshot.height - 1, rawY - snapshot.top))
 
-        var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
-        var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
-
-        return { x: localX, y: localY }
+        return { valid: true, x: localX, y: localY }
     }
     
     VideoOutput {
@@ -191,6 +221,14 @@ Item {
                 return
             }
 
+            var geometry = projectionView.projectionGeometrySnapshot()
+            if (!geometry.valid) {
+                console.warn("[AA][touchCapture] dropping " + eventType + " due to invalid projection geometry")
+                return
+            }
+
+            projectionView.applyTouchForwarderGeometry(geometry)
+
             if (eventType === "press" && touchPoints.length > 0) {
                 hasSeenTouchPointEvents = true
             }
@@ -199,7 +237,10 @@ Item {
             var points = []
             for (var i = 0; i < touchPoints.length; i++) {
                 var tp = touchPoints[i]
-                var mapped = projectionView.mapToProjectionCoordinates(tp.x, tp.y)
+                var mapped = projectionView.mapToProjectionCoordinates(tp.x, tp.y, geometry)
+                if (!mapped.valid) {
+                    continue
+                }
                 points.push({
                     id: tp.pointId,
                     x: mapped.x,
@@ -208,6 +249,11 @@ Item {
                     areaWidth: tp.area.width,
                     areaHeight: tp.area.height
                 })
+            }
+
+            if (points.length === 0) {
+                console.warn("[AA][touchCapture] dropping " + eventType + " due to empty mapped touch points")
+                return
             }
             
             // Forward to TouchEventForwarder
@@ -249,7 +295,18 @@ Item {
                 return
             }
 
-            var mapped = projectionView.mapToProjectionCoordinates(mouse.x, mouse.y)
+            var geometry = projectionView.projectionGeometrySnapshot()
+            if (!geometry.valid) {
+                console.warn("[AA][mouseCapture] dropping " + eventType + " due to invalid projection geometry")
+                return
+            }
+
+            projectionView.applyTouchForwarderGeometry(geometry)
+
+            var mapped = projectionView.mapToProjectionCoordinates(mouse.x, mouse.y, geometry)
+            if (!mapped.valid) {
+                return
+            }
             
             // Forward to TouchEventForwarder as mouse event
             touchForwarder.forwardMouseEvent(eventType, mapped.x, mapped.y)

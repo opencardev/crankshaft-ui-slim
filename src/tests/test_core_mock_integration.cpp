@@ -289,6 +289,46 @@ private slots:
         QCOMPARE(outSecond.value("id").toInt(), 22);
     }
 
+    void testTouchForwarderRepeatabilityAndBoundsForEdgePoints() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        TouchEventForwarder forwarder(&facade, &services);
+
+        forwarder.setDisplaySize(QSize(800, 480));
+        forwarder.setAndroidAutoSize(QSize(800, 480));
+
+        auto makeTouch = [](double x, double y) {
+            QVariantList points;
+            QVariantMap point;
+            point["id"] = 1;
+            point["x"] = x;
+            point["y"] = y;
+            point["pressure"] = 1.0;
+            point["areaWidth"] = 8;
+            point["areaHeight"] = 8;
+            points.append(point);
+            return points;
+        };
+
+        forwarder.forwardTouchEvent(QStringLiteral("press"), makeTouch(799.0, 479.0));
+        QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 1);
+        QVariantMap firstOut = m_mockCoreClient->lastTouchPoints.first().toMap();
+        QCOMPARE(firstOut.value("x").toInt(), 799);
+        QCOMPARE(firstOut.value("y").toInt(), 479);
+
+        forwarder.forwardTouchEvent(QStringLiteral("press"), makeTouch(799.0, 479.0));
+        QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 2);
+        QVariantMap secondOut = m_mockCoreClient->lastTouchPoints.first().toMap();
+        QCOMPARE(secondOut.value("x").toInt(), 799);
+        QCOMPARE(secondOut.value("y").toInt(), 479);
+
+        forwarder.forwardTouchEvent(QStringLiteral("press"), makeTouch(5000.0, 9000.0));
+        QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 3);
+        QVariantMap clampedOut = m_mockCoreClient->lastTouchPoints.first().toMap();
+        QCOMPARE(clampedOut.value("x").toInt(), 799);
+        QCOMPARE(clampedOut.value("y").toInt(), 479);
+    }
+
     void testRepeatedVideoFramesDoNotReemitActiveState() {
         CoreClient client;
 

@@ -517,6 +517,15 @@ ApplicationWindow {
                             return
                         }
 
+                        var geometry = projectionGeometrySnapshot()
+                        if (!geometry.valid) {
+                            return
+                        }
+
+                        applyTouchForwarderGeometry(geometry)
+                    }
+
+                    function projectionGeometrySnapshot() {
                         var videoRect = videoContentRect()
                         var mappedWidth = webRtcActive && videoRect.width > 0
                             ? videoRect.width
@@ -524,41 +533,53 @@ ApplicationWindow {
                         var mappedHeight = webRtcActive && videoRect.height > 0
                             ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
-                        _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
-
-                        var aaWidth = _androidAutoFacade && _androidAutoFacade.projectionWidth > 0
-                            ? _androidAutoFacade.projectionWidth
-                            : mappedWidth
-                        var aaHeight = _androidAutoFacade && _androidAutoFacade.projectionHeight > 0
-                            ? _androidAutoFacade.projectionHeight
-                            : mappedHeight
-                        _touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
-                    }
-
-                    function mapToProjectionCoordinates(rawX, rawY) {
-                        var videoRect = videoContentRect()
-                        var frameWidth = webRtcActive && videoRect.width > 0
-                            ? videoRect.width
-                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var frameHeight = webRtcActive && videoRect.height > 0
-                            ? videoRect.height
-                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
-
-                        if (frameWidth <= 0 || frameHeight <= 0) {
-                            return { x: 0, y: 0 }
-                        }
 
                         var frameLeft = webRtcActive && videoRect.width > 0
                             ? videoRect.x
-                            : (projectionImage.width - frameWidth) / 2
+                            : (projectionImage.width - mappedWidth) / 2
                         var frameTop = webRtcActive && videoRect.height > 0
                             ? videoRect.y
-                            : (projectionImage.height - frameHeight) / 2
+                            : (projectionImage.height - mappedHeight) / 2
 
-                        var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
-                        var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
+                        var valid = isFinite(mappedWidth) && isFinite(mappedHeight) &&
+                                    isFinite(frameLeft) && isFinite(frameTop) &&
+                                    mappedWidth > 0 && mappedHeight > 0
 
-                        return { x: localX, y: localY }
+                        return {
+                            valid: valid,
+                            width: mappedWidth,
+                            height: mappedHeight,
+                            left: frameLeft,
+                            top: frameTop
+                        }
+                    }
+
+                    function applyTouchForwarderGeometry(geometry) {
+                        if (!_touchForwarder || !geometry || !geometry.valid) {
+                            return
+                        }
+
+                        _touchForwarder.displaySize = Qt.size(geometry.width, geometry.height)
+
+                        var aaWidth = _androidAutoFacade && _androidAutoFacade.projectionWidth > 0
+                            ? _androidAutoFacade.projectionWidth
+                            : geometry.width
+                        var aaHeight = _androidAutoFacade && _androidAutoFacade.projectionHeight > 0
+                            ? _androidAutoFacade.projectionHeight
+                            : geometry.height
+                        _touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
+                    }
+
+                    function mapToProjectionCoordinates(rawX, rawY, geometry) {
+                        var snapshot = geometry ? geometry : projectionGeometrySnapshot()
+                        if (!snapshot.valid) {
+                            return { valid: false, x: 0, y: 0 }
+                        }
+
+                        var localX = Math.max(0, Math.min(snapshot.width - 1, rawX - snapshot.left))
+                        var localY = Math.max(0, Math.min(snapshot.height - 1, rawY - snapshot.top))
+
+                        return { valid: true, x: localX, y: localY }
                     }
 
                     focus: visible
@@ -769,6 +790,14 @@ ApplicationWindow {
                                 return
                             }
 
+                            var geometry = projectionSurface.projectionGeometrySnapshot()
+                            if (!geometry.valid) {
+                                console.warn("[AA][touchCapture] dropping " + eventType + " due to invalid projection geometry")
+                                return
+                            }
+
+                            projectionSurface.applyTouchForwarderGeometry(geometry)
+
                             if (eventType === "press" && touchPoints.length > 0) {
                                 hasSeenTouchPointEvents = true
                             }
@@ -776,7 +805,10 @@ ApplicationWindow {
                             var points = []
                             for (var i = 0; i < touchPoints.length; i++) {
                                 var tp = touchPoints[i]
-                                var mapped = projectionSurface.mapToProjectionCoordinates(tp.x, tp.y)
+                                var mapped = projectionSurface.mapToProjectionCoordinates(tp.x, tp.y, geometry)
+                                if (!mapped.valid) {
+                                    continue
+                                }
                                 points.push({
                                     id: tp.pointId,
                                     x: mapped.x,
@@ -785,6 +817,11 @@ ApplicationWindow {
                                     areaWidth: tp.area.width,
                                     areaHeight: tp.area.height
                                 })
+                            }
+
+                            if (points.length === 0) {
+                                console.warn("[AA][touchCapture] dropping " + eventType + " due to empty mapped touch points")
+                                return
                             }
 
                             _touchForwarder.forwardTouchEvent(eventType, points)
@@ -804,14 +841,33 @@ ApplicationWindow {
                         onPressed: (mouse) => {
                             isPressed = true
                             if (_touchForwarder) {
-                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                var geometry = projectionSurface.projectionGeometrySnapshot()
+                                if (!geometry.valid) {
+                                    console.warn("[AA][mouseCapture] dropping press due to invalid projection geometry")
+                                    return
+                                }
+
+                                projectionSurface.applyTouchForwarderGeometry(geometry)
+                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y, geometry)
+                                if (!mapped.valid) {
+                                    return
+                                }
                                 _touchForwarder.forwardMouseEvent("press", mapped.x, mapped.y)
                             }
                         }
 
                         onPositionChanged: (mouse) => {
                             if (isPressed && _touchForwarder) {
-                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                var geometry = projectionSurface.projectionGeometrySnapshot()
+                                if (!geometry.valid) {
+                                    return
+                                }
+
+                                projectionSurface.applyTouchForwarderGeometry(geometry)
+                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y, geometry)
+                                if (!mapped.valid) {
+                                    return
+                                }
                                 _touchForwarder.forwardMouseEvent("move", mapped.x, mapped.y)
                             }
                         }
@@ -819,7 +875,16 @@ ApplicationWindow {
                         onReleased: (mouse) => {
                             isPressed = false
                             if (_touchForwarder) {
-                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                var geometry = projectionSurface.projectionGeometrySnapshot()
+                                if (!geometry.valid) {
+                                    return
+                                }
+
+                                projectionSurface.applyTouchForwarderGeometry(geometry)
+                                var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y, geometry)
+                                if (!mapped.valid) {
+                                    return
+                                }
                                 _touchForwarder.forwardMouseEvent("release", mapped.x, mapped.y)
                             }
                         }
