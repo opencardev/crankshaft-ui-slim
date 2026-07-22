@@ -156,6 +156,17 @@ auto TouchEventForwarder::forwardTouchEvent(const QString& eventType,
     // Convert QML touch points to our format
     QList<TouchPoint> points = convertTouchPoints(touchPoints);
 
+    if (m_androidAutoSize.width() <= 0 || m_androidAutoSize.height() <= 0) {
+        Logger::instance().warningContext(
+            "TouchEventForwarder",
+            QString("Dropping touch event '%1': invalid AndroidAuto size %2x%3")
+                .arg(eventType)
+                .arg(m_androidAutoSize.width())
+                .arg(m_androidAutoSize.height()));
+        emit forwardingError("AndroidAuto size unavailable for touch forwarding");
+        return;
+    }
+
     if (points.isEmpty()) {
         Logger::instance().warningContext("TouchEventForwarder",
                                           "No valid touch points to forward");
@@ -168,6 +179,21 @@ auto TouchEventForwarder::forwardTouchEvent(const QString& eventType,
 
     // Send to AndroidAuto
     sendToAndroidAuto(eventType, points);
+
+    if (eventType == QStringLiteral("press") && !points.isEmpty()) {
+        const TouchPoint& firstPoint = points.first();
+        Logger::instance().infoContext(
+            "TouchEventForwarder",
+            QString("Projection touch press captured raw=(%1,%2) scaled=(%3,%4) display=%5x%6 aa=%7x%8")
+                .arg(firstPoint.position.x(), 0, 'f', 1)
+                .arg(firstPoint.position.y(), 0, 'f', 1)
+                .arg(firstPoint.scaledPosition.x(), 0, 'f', 1)
+                .arg(firstPoint.scaledPosition.y(), 0, 'f', 1)
+                .arg(m_displaySize.width())
+                .arg(m_displaySize.height())
+                .arg(m_androidAutoSize.width())
+                .arg(m_androidAutoSize.height()));
+    }
 
     // Measure latency
     qint64 latency = m_latencyTimer.nsecsElapsed() / 1000;  // Convert to microseconds

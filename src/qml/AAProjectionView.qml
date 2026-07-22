@@ -167,6 +167,7 @@ Item {
         // Enable multi-touch (required for gestures like pinch-zoom)
         minimumTouchPoints: 1
         maximumTouchPoints: 10
+        property bool hasSeenTouchPointEvents: false
         
         onPressed: (touchPoints) => {
             forwardTouchEvent("press", touchPoints)
@@ -189,6 +190,10 @@ Item {
                 console.warn("TouchEventForwarder not available")
                 return
             }
+
+            if (eventType === "press" && touchPoints.length > 0) {
+                hasSeenTouchPointEvents = true
+            }
             
             // Convert touch points to array of objects
             var points = []
@@ -207,6 +212,10 @@ Item {
             
             // Forward to TouchEventForwarder
             touchForwarder.forwardTouchEvent(eventType, points)
+
+            if (eventType === "press") {
+                console.debug("[AA][touchCapture] AAProjectionView touchpoints active count=" + points.length)
+            }
         }
     }
     
@@ -214,7 +223,7 @@ Item {
     MouseArea {
         id: mouseArea
         anchors.fill: parent
-        enabled: !touchArea.enabled // Only active if touch is not available
+        enabled: touchForwarder && !touchArea.hasSeenTouchPointEvents
         
         property bool isPressed: false
         
@@ -244,6 +253,12 @@ Item {
             
             // Forward to TouchEventForwarder as mouse event
             touchForwarder.forwardMouseEvent(eventType, mapped.x, mapped.y)
+        }
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            touchArea.hasSeenTouchPointEvents = false
         }
     }
     

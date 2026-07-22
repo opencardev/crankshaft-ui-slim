@@ -214,6 +214,81 @@ private slots:
         QVERIFY(!m_mockCoreClient->lastTouchPoints.isEmpty());
     }
 
+    void testTouchForwarderMouseFallbackSendsEventsToMockedCoreClient() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        TouchEventForwarder forwarder(&facade, &services);
+
+        forwarder.forwardMouseEvent(QStringLiteral("press"), 240.0, 180.0);
+
+        QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 1);
+        QCOMPARE(m_mockCoreClient->lastTouchEventType, QStringLiteral("press"));
+        QVERIFY(!m_mockCoreClient->lastTouchPoints.isEmpty());
+
+        const QVariantMap firstPoint = m_mockCoreClient->lastTouchPoints.first().toMap();
+        QVERIFY(firstPoint.contains(QStringLiteral("x")));
+        QVERIFY(firstPoint.contains(QStringLiteral("y")));
+    }
+
+    void testTouchForwarderDropsEventWhenAndroidAutoSizeInvalid() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        TouchEventForwarder forwarder(&facade, &services);
+
+        forwarder.setAndroidAutoSize(QSize(0, 0));
+
+        QVariantList touchPoints;
+        QVariantMap point;
+        point["id"] = 1;
+        point["x"] = 100.0;
+        point["y"] = 120.0;
+        point["pressure"] = 1.0;
+        point["areaWidth"] = 8;
+        point["areaHeight"] = 8;
+        touchPoints.append(point);
+
+        forwarder.forwardTouchEvent(QStringLiteral("press"), touchPoints);
+
+        QCOMPARE(m_mockCoreClient->sendTouchEventCalls, 0);
+    }
+
+    void testTouchForwarderPreservesMultiPointOrderAndIds() {
+        auto& services = ServiceProvider::instance();
+        AndroidAutoFacade facade(&services);
+        TouchEventForwarder forwarder(&facade, &services);
+
+        QVariantList touchPoints;
+
+        QVariantMap first;
+        first["id"] = 11;
+        first["x"] = 100.0;
+        first["y"] = 120.0;
+        first["pressure"] = 1.0;
+        first["areaWidth"] = 8;
+        first["areaHeight"] = 8;
+        touchPoints.append(first);
+
+        QVariantMap second;
+        second["id"] = 22;
+        second["x"] = 220.0;
+        second["y"] = 260.0;
+        second["pressure"] = 1.0;
+        second["areaWidth"] = 8;
+        second["areaHeight"] = 8;
+        touchPoints.append(second);
+
+        forwarder.forwardTouchEvent(QStringLiteral("move"), touchPoints);
+
+        QTRY_COMPARE(m_mockCoreClient->sendTouchEventCalls, 1);
+        QCOMPARE(m_mockCoreClient->lastTouchPoints.size(), 2);
+
+        const QVariantMap outFirst = m_mockCoreClient->lastTouchPoints.at(0).toMap();
+        const QVariantMap outSecond = m_mockCoreClient->lastTouchPoints.at(1).toMap();
+
+        QCOMPARE(outFirst.value("id").toInt(), 11);
+        QCOMPARE(outSecond.value("id").toInt(), 22);
+    }
+
     void testRepeatedVideoFramesDoNotReemitActiveState() {
         CoreClient client;
 

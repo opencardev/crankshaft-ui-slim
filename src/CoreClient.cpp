@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QUrl>
 #include <QTimer>
+#include <cmath>
 
 #include "Logger.h"
 
@@ -395,15 +396,47 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
         return;
     }
 
-    const QVariantMap firstPoint = points.first().toMap();
-    if (firstPoint.isEmpty()) {
+    QJsonObject touchPayload;
+    touchPayload["action"] = eventType;
+
+    QJsonArray serializedPoints;
+    for (const QVariant& pointVar : points) {
+        const QVariantMap point = pointVar.toMap();
+        if (point.isEmpty()) {
+            continue;
+        }
+
+        if (!point.contains("x") || !point.contains("y")) {
+            continue;
+        }
+
+        bool xOk = false;
+        bool yOk = false;
+        const double x = point.value("x").toDouble(&xOk);
+        const double y = point.value("y").toDouble(&yOk);
+        if (!xOk || !yOk || !std::isfinite(x) || !std::isfinite(y)) {
+            continue;
+        }
+
+        QJsonObject serializedPoint;
+        serializedPoint["x"] = x;
+        serializedPoint["y"] = y;
+        if (point.contains("id")) {
+            serializedPoint["id"] = point.value("id").toInt();
+        }
+        serializedPoints.append(serializedPoint);
+    }
+
+    if (serializedPoints.isEmpty()) {
         return;
     }
 
-    QJsonObject touchPayload;
+    // Keep legacy single-point fields for backward compatibility while
+    // providing additive multi-point payload for newer handlers.
+    const QJsonObject firstPoint = serializedPoints.first().toObject();
     touchPayload["x"] = firstPoint.value("x").toDouble();
     touchPayload["y"] = firstPoint.value("y").toDouble();
-    touchPayload["action"] = eventType;
+    touchPayload["points"] = serializedPoints;
 
     QJsonObject touchMessage;
     touchMessage["type"] = "publish";

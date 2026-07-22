@@ -566,6 +566,8 @@ ApplicationWindow {
                         if (visible) {
                             forceActiveFocus()
                             updateTouchForwarderDisplaySize()
+                        } else {
+                            projectionTouchArea.hasSeenTouchPointEvents = false
                         }
                     }
 
@@ -755,6 +757,8 @@ ApplicationWindow {
                         minimumTouchPoints: 1
                         maximumTouchPoints: 10
 
+                        property bool hasSeenTouchPointEvents: false
+
                         onPressed: (touchPoints) => forwardTouchEvent("press", touchPoints)
                         onUpdated: (touchPoints) => forwardTouchEvent("move", touchPoints)
                         onReleased: (touchPoints) => forwardTouchEvent("release", touchPoints)
@@ -763,6 +767,10 @@ ApplicationWindow {
                         function forwardTouchEvent(eventType, touchPoints) {
                             if (!_touchForwarder) {
                                 return
+                            }
+
+                            if (eventType === "press" && touchPoints.length > 0) {
+                                hasSeenTouchPointEvents = true
                             }
 
                             var points = []
@@ -780,12 +788,16 @@ ApplicationWindow {
                             }
 
                             _touchForwarder.forwardTouchEvent(eventType, points)
+
+                            if (eventType === "press") {
+                                console.debug("[AA][touchCapture] projection touchpoints active count=" + points.length)
+                            }
                         }
                     }
 
                     MouseArea {
                         anchors.fill: parent
-                        enabled: !projectionTouchArea.enabled
+                        enabled: _touchForwarder && !projectionTouchArea.hasSeenTouchPointEvents
 
                         property bool isPressed: false
 
