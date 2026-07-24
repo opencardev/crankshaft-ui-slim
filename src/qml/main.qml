@@ -405,6 +405,14 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     color: theme.colors.background
                     readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
+                    readonly property bool debugTouchOverlayEnabled:
+                        ((typeof _debugTouchOverlay !== "undefined") && _debugTouchOverlay) ||
+                        (Qt.application && Qt.application.arguments &&
+                         Qt.application.arguments.indexOf("--debug-touch-overlay") !== -1)
+                    property string debugLastEventType: ""
+                    property var debugLastGeometry: ({ valid: false, left: 0, top: 0, width: 0, height: 0 })
+                    property var debugMappedPoints: []
+                    property string debugGeometryStatus: ""
                     readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
                     readonly property bool webRtcFallbackRequested: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
                     readonly property int webRtcFallbackDelayMs: 2500
@@ -580,6 +588,25 @@ ApplicationWindow {
                         var localY = Math.max(0, Math.min(snapshot.height - 1, rawY - snapshot.top))
 
                         return { valid: true, x: localX, y: localY }
+                    }
+
+                    function updateTouchDebugState(eventType, geometry, mappedPoints, status) {
+                        if (!debugTouchOverlayEnabled) {
+                            return
+                        }
+
+                        debugLastEventType = eventType
+                        debugLastGeometry = geometry && geometry.valid
+                            ? {
+                                valid: true,
+                                left: geometry.left,
+                                top: geometry.top,
+                                width: geometry.width,
+                                height: geometry.height
+                            }
+                            : { valid: false, left: 0, top: 0, width: 0, height: 0 }
+                        debugMappedPoints = mappedPoints ? mappedPoints.slice(0, 5) : []
+                        debugGeometryStatus = status ? status : ""
                     }
 
                     focus: visible
@@ -779,6 +806,7 @@ ApplicationWindow {
                         maximumTouchPoints: 10
 
                         property bool hasSeenTouchPointEvents: false
+                        property var gestureGeometry: null
 
                         onPressed: (touchPoints) => forwardTouchEvent("press", touchPoints)
                         onUpdated: (touchPoints) => forwardTouchEvent("move", touchPoints)
@@ -790,8 +818,20 @@ ApplicationWindow {
                                 return
                             }
 
-                            var geometry = projectionSurface.projectionGeometrySnapshot()
+                            var geometry = null
+                            if (eventType === "press") {
+                                geometry = projectionSurface.projectionGeometrySnapshot()
+                                if (geometry.valid) {
+                                    gestureGeometry = geometry
+                                }
+                            } else if (gestureGeometry && gestureGeometry.valid) {
+                                geometry = gestureGeometry
+                            } else {
+                                geometry = projectionSurface.projectionGeometrySnapshot()
+                            }
+
                             if (!geometry.valid) {
+                                projectionSurface.updateTouchDebugState(eventType, geometry, [], "invalid geometry")
                                 console.warn("[AA][touchCapture] dropping " + eventType + " due to invalid projection geometry")
                                 return
                             }
@@ -820,11 +860,18 @@ ApplicationWindow {
                             }
 
                             if (points.length === 0) {
+                                projectionSurface.updateTouchDebugState(eventType, geometry, [], "empty mapped touch points")
                                 console.warn("[AA][touchCapture] dropping " + eventType + " due to empty mapped touch points")
                                 return
                             }
 
+                            projectionSurface.updateTouchDebugState(eventType, geometry, points, "")
+
                             _touchForwarder.forwardTouchEvent(eventType, points)
+
+                            if (eventType === "release" || eventType === "cancel") {
+                                gestureGeometry = null
+                            }
 
                             if (eventType === "press") {
                                 console.debug("[AA][touchCapture] projection touchpoints active count=" + points.length)
@@ -837,12 +884,17 @@ ApplicationWindow {
                         enabled: _touchForwarder && !projectionTouchArea.hasSeenTouchPointEvents
 
                         property bool isPressed: false
+                        property var gestureGeometry: null
 
                         onPressed: (mouse) => {
                             isPressed = true
                             if (_touchForwarder) {
                                 var geometry = projectionSurface.projectionGeometrySnapshot()
+                                if (geometry.valid) {
+                                    gestureGeometry = geometry
+                                }
                                 if (!geometry.valid) {
+                                    projectionSurface.updateTouchDebugState("press", geometry, [], "invalid geometry")
                                     console.warn("[AA][mouseCapture] dropping press due to invalid projection geometry")
                                     return
                                 }
@@ -852,14 +904,18 @@ ApplicationWindow {
                                 if (!mapped.valid) {
                                     return
                                 }
+                                projectionSurface.updateTouchDebugState("press", geometry, [{ id: 0, x: mapped.x, y: mapped.y }], "")
                                 _touchForwarder.forwardMouseEvent("press", mapped.x, mapped.y)
                             }
                         }
 
                         onPositionChanged: (mouse) => {
                             if (isPressed && _touchForwarder) {
-                                var geometry = projectionSurface.projectionGeometrySnapshot()
+                                var geometry = (gestureGeometry && gestureGeometry.valid)
+                                    ? gestureGeometry
+                                    : projectionSurface.projectionGeometrySnapshot()
                                 if (!geometry.valid) {
+                                    projectionSurface.updateTouchDebugState("move", geometry, [], "invalid geometry")
                                     return
                                 }
 
@@ -868,6 +924,7 @@ ApplicationWindow {
                                 if (!mapped.valid) {
                                     return
                                 }
+                                projectionSurface.updateTouchDebugState("move", geometry, [{ id: 0, x: mapped.x, y: mapped.y }], "")
                                 _touchForwarder.forwardMouseEvent("move", mapped.x, mapped.y)
                             }
                         }
@@ -875,8 +932,11 @@ ApplicationWindow {
                         onReleased: (mouse) => {
                             isPressed = false
                             if (_touchForwarder) {
-                                var geometry = projectionSurface.projectionGeometrySnapshot()
+                                var geometry = (gestureGeometry && gestureGeometry.valid)
+                                    ? gestureGeometry
+                                    : projectionSurface.projectionGeometrySnapshot()
                                 if (!geometry.valid) {
+                                    projectionSurface.updateTouchDebugState("release", geometry, [], "invalid geometry")
                                     return
                                 }
 
@@ -885,7 +945,93 @@ ApplicationWindow {
                                 if (!mapped.valid) {
                                     return
                                 }
+                                projectionSurface.updateTouchDebugState("release", geometry, [{ id: 0, x: mapped.x, y: mapped.y }], "")
                                 _touchForwarder.forwardMouseEvent("release", mapped.x, mapped.y)
+                            }
+                            gestureGeometry = null
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        visible: projectionSurface.debugTouchOverlayEnabled
+                        enabled: false
+                        z: 100
+                        color: "transparent"
+
+                        property var overlayGeometry: projectionSurface.debugLastGeometry.valid
+                            ? projectionSurface.debugLastGeometry
+                            : projectionSurface.projectionGeometrySnapshot()
+
+                        Rectangle {
+                            x: parent.overlayGeometry.left
+                            y: parent.overlayGeometry.top
+                            width: Math.max(0, parent.overlayGeometry.width)
+                            height: Math.max(0, parent.overlayGeometry.height)
+                            color: "transparent"
+                            border.width: 2
+                            border.color: Qt.rgba(0.2, 0.9, 0.2, 0.9)
+                            visible: parent.overlayGeometry.valid
+                        }
+
+                        Repeater {
+                            model: projectionSurface.debugMappedPoints
+                            delegate: Rectangle {
+                                required property var modelData
+                                x: parent.overlayGeometry.left + modelData.x - 6
+                                y: parent.overlayGeometry.top + modelData.y - 6
+                                width: 12
+                                height: 12
+                                radius: 6
+                                color: Qt.rgba(0.95, 0.2, 0.2, 0.9)
+                                border.width: 1
+                                border.color: "white"
+                                visible: parent.overlayGeometry.valid
+
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 2
+                                    height: 16
+                                    color: "white"
+                                }
+
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 16
+                                    height: 2
+                                    color: "white"
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.margins: theme.spacing.small
+                            color: Qt.rgba(0, 0, 0, 0.65)
+                            border.width: 1
+                            border.color: theme.colors.textSecondary
+                            radius: 6
+                            width: Math.min(parent.width - theme.spacing.small * 2, 420)
+                            height: overlayText.implicitHeight + theme.spacing.small
+
+                            Text {
+                                id: overlayText
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                wrapMode: Text.Wrap
+                                color: "white"
+                                font.pixelSize: theme.typography.caption
+                                font.family: theme.typography.fontFamily
+                                text: {
+                                    var g = parent.parent.overlayGeometry
+                                    var count = projectionSurface.debugMappedPoints ? projectionSurface.debugMappedPoints.length : 0
+                                    var status = projectionSurface.debugGeometryStatus !== "" ? (" status=" + projectionSurface.debugGeometryStatus) : ""
+                                    return "touch-overlay " + projectionSurface.debugLastEventType +
+                                           " points=" + count +
+                                           " frame=(" + Math.round(g.left) + "," + Math.round(g.top) + " " +
+                                           Math.round(g.width) + "x" + Math.round(g.height) + ")" + status
+                                }
                             }
                         }
                     }

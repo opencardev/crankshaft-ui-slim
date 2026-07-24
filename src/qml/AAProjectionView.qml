@@ -46,6 +46,14 @@ Item {
     // TouchEventForwarder reference (set by parent or use global _touchForwarder)
     property var touchForwarder: _touchForwarder
     property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
+    readonly property bool debugTouchOverlayEnabled:
+        ((typeof _debugTouchOverlay !== "undefined") && _debugTouchOverlay) ||
+        (Qt.application && Qt.application.arguments &&
+         Qt.application.arguments.indexOf("--debug-touch-overlay") !== -1)
+    property string debugLastEventType: ""
+    property var debugLastGeometry: ({ valid: false, left: 0, top: 0, width: 0, height: 0 })
+    property var debugMappedPoints: []
+    property string debugGeometryStatus: ""
     readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
     readonly property bool webRtcHealthy: androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active && androidAutoWebRtcReceiver.healthy
     readonly property bool webRtcFallbackActive: webRtcSelected && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.fallbackRecommended
@@ -144,6 +152,25 @@ Item {
 
         return { valid: true, x: localX, y: localY }
     }
+
+    function updateTouchDebugState(eventType, geometry, mappedPoints, status) {
+        if (!debugTouchOverlayEnabled) {
+            return
+        }
+
+        debugLastEventType = eventType
+        debugLastGeometry = geometry && geometry.valid
+            ? {
+                valid: true,
+                left: geometry.left,
+                top: geometry.top,
+                width: geometry.width,
+                height: geometry.height
+            }
+            : { valid: false, left: 0, top: 0, width: 0, height: 0 }
+        debugMappedPoints = mappedPoints ? mappedPoints.slice(0, 5) : []
+        debugGeometryStatus = status ? status : ""
+    }
     
     VideoOutput {
         id: projectionVideoOutput
@@ -198,6 +225,7 @@ Item {
         minimumTouchPoints: 1
         maximumTouchPoints: 10
         property bool hasSeenTouchPointEvents: false
+        property var gestureGeometry: null
         
         onPressed: (touchPoints) => {
             forwardTouchEvent("press", touchPoints)
@@ -221,8 +249,20 @@ Item {
                 return
             }
 
-            var geometry = projectionView.projectionGeometrySnapshot()
+            var geometry = null
+            if (eventType === "press") {
+                geometry = projectionView.projectionGeometrySnapshot()
+                if (geometry.valid) {
+                    gestureGeometry = geometry
+                }
+            } else if (gestureGeometry && gestureGeometry.valid) {
+                geometry = gestureGeometry
+            } else {
+                geometry = projectionView.projectionGeometrySnapshot()
+            }
+
             if (!geometry.valid) {
+                projectionView.updateTouchDebugState(eventType, geometry, [], "invalid geometry")
                 console.warn("[AA][touchCapture] dropping " + eventType + " due to invalid projection geometry")
                 return
             }
@@ -252,12 +292,19 @@ Item {
             }
 
             if (points.length === 0) {
+                projectionView.updateTouchDebugState(eventType, geometry, [], "empty mapped touch points")
                 console.warn("[AA][touchCapture] dropping " + eventType + " due to empty mapped touch points")
                 return
             }
+
+            projectionView.updateTouchDebugState(eventType, geometry, points, "")
             
             // Forward to TouchEventForwarder
             touchForwarder.forwardTouchEvent(eventType, points)
+
+            if (eventType === "release" || eventType === "cancel") {
+                gestureGeometry = null
+            }
 
             if (eventType === "press") {
                 console.debug("[AA][touchCapture] AAProjectionView touchpoints active count=" + points.length)
@@ -272,9 +319,11 @@ Item {
         enabled: touchForwarder && !touchArea.hasSeenTouchPointEvents
         
         property bool isPressed: false
+        property var gestureGeometry: null
         
         onPressed: (mouse) => {
             isPressed = true
+            gestureGeometry = projectionView.projectionGeometrySnapshot()
             sendMouseAsTouchEvent("press", mouse)
         }
         
@@ -287,6 +336,7 @@ Item {
         onReleased: (mouse) => {
             isPressed = false
             sendMouseAsTouchEvent("release", mouse)
+            gestureGeometry = null
         }
         
         function sendMouseAsTouchEvent(eventType, mouse) {
@@ -295,8 +345,18 @@ Item {
                 return
             }
 
-            var geometry = projectionView.projectionGeometrySnapshot()
+            var geometry = eventType === "press"
+                ? projectionView.projectionGeometrySnapshot()
+                : (gestureGeometry && gestureGeometry.valid
+                    ? gestureGeometry
+                    : projectionView.projectionGeometrySnapshot())
+
+            if (eventType === "press" && geometry.valid) {
+                gestureGeometry = geometry
+            }
+
             if (!geometry.valid) {
+                projectionView.updateTouchDebugState(eventType, geometry, [], "invalid geometry")
                 console.warn("[AA][mouseCapture] dropping " + eventType + " due to invalid projection geometry")
                 return
             }
@@ -307,15 +367,102 @@ Item {
             if (!mapped.valid) {
                 return
             }
+
+            projectionView.updateTouchDebugState(eventType, geometry, [{ id: 0, x: mapped.x, y: mapped.y }], "")
             
             // Forward to TouchEventForwarder as mouse event
             touchForwarder.forwardMouseEvent(eventType, mapped.x, mapped.y)
         }
     }
 
+    Rectangle {
+        anchors.fill: parent
+        visible: projectionView.debugTouchOverlayEnabled
+        enabled: false
+        z: 100
+        color: "transparent"
+
+        property var overlayGeometry: projectionView.debugLastGeometry.valid
+            ? projectionView.debugLastGeometry
+            : projectionView.projectionGeometrySnapshot()
+
+        Rectangle {
+            x: parent.overlayGeometry.left
+            y: parent.overlayGeometry.top
+            width: Math.max(0, parent.overlayGeometry.width)
+            height: Math.max(0, parent.overlayGeometry.height)
+            color: "transparent"
+            border.width: 2
+            border.color: Qt.rgba(0.2, 0.9, 0.2, 0.9)
+            visible: parent.overlayGeometry.valid
+        }
+
+        Repeater {
+            model: projectionView.debugMappedPoints
+            delegate: Rectangle {
+                required property var modelData
+                x: parent.overlayGeometry.left + modelData.x - 6
+                y: parent.overlayGeometry.top + modelData.y - 6
+                width: 12
+                height: 12
+                radius: 6
+                color: Qt.rgba(0.95, 0.2, 0.2, 0.9)
+                border.width: 1
+                border.color: "white"
+                visible: parent.overlayGeometry.valid
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 2
+                    height: 16
+                    color: "white"
+                }
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 16
+                    height: 2
+                    color: "white"
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            anchors.margins: palette.spacingMedium
+            color: Qt.rgba(0, 0, 0, 0.65)
+            border.width: 1
+            border.color: palette.textSecondaryColor
+            radius: palette.radiusSmall
+            width: Math.min(parent.width - palette.spacingMedium * 2, 420)
+            height: overlayText.implicitHeight + palette.spacingMedium
+
+            Text {
+                id: overlayText
+                anchors.fill: parent
+                anchors.margins: 6
+                wrapMode: Text.Wrap
+                color: "white"
+                font.pixelSize: palette.fontSizeSmall
+                text: {
+                    var g = parent.parent.overlayGeometry
+                    var count = projectionView.debugMappedPoints ? projectionView.debugMappedPoints.length : 0
+                    var status = projectionView.debugGeometryStatus !== "" ? (" status=" + projectionView.debugGeometryStatus) : ""
+                    return "touch-overlay " + projectionView.debugLastEventType +
+                           " points=" + count +
+                           " frame=(" + Math.round(g.left) + "," + Math.round(g.top) + " " +
+                           Math.round(g.width) + "x" + Math.round(g.height) + ")" + status
+                }
+            }
+        }
+    }
+
     onVisibleChanged: {
         if (!visible) {
             touchArea.hasSeenTouchPointEvents = false
+            touchArea.gestureGeometry = null
+            mouseArea.gestureGeometry = null
         }
     }
     
