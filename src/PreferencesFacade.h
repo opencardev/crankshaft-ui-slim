@@ -50,6 +50,8 @@ class PreferencesFacade : public QObject {
     Q_PROPERTY(int aaProjectionFullscreenDelaySeconds READ aaProjectionFullscreenDelaySeconds
                    WRITE setAaProjectionFullscreenDelaySeconds NOTIFY
                        aaProjectionFullscreenDelaySecondsChanged)
+    Q_PROPERTY(bool debugTouchOverlayEnabled READ debugTouchOverlayEnabled WRITE
+                   setDebugTouchOverlayEnabled NOTIFY debugTouchOverlayEnabledChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
 
     // Audio settings
@@ -88,6 +90,7 @@ public:
     [[nodiscard]] auto displayBrightness() const -> int;
     [[nodiscard]] auto displayRotation() const -> int;
     [[nodiscard]] auto aaProjectionFullscreenDelaySeconds() const -> int;
+    [[nodiscard]] auto debugTouchOverlayEnabled() const -> bool;
     [[nodiscard]] auto audioVolume() const -> int;
     [[nodiscard]] auto connectionPreference() const -> QString;
     [[nodiscard]] auto themeMode() const -> QString;
@@ -97,6 +100,7 @@ public:
     void setDisplayBrightness(int value);
     void setDisplayRotation(int value);
     void setAaProjectionFullscreenDelaySeconds(int value);
+    void setDebugTouchOverlayEnabled(bool value);
     void setAudioVolume(int value);
     void setConnectionPreference(const QString& mode);
     auto setThemeMode(const QString& mode) -> void;
@@ -115,6 +119,7 @@ signals:
     void displayBrightnessChanged(int value);
     void displayRotationChanged(int value);
     void aaProjectionFullscreenDelaySecondsChanged(int value);
+    void debugTouchOverlayEnabledChanged(bool value);
     void audioVolumeChanged(int value);
     void connectionPreferenceChanged(const QString& mode);
     void themeModeChanged(const QString& mode);
@@ -173,6 +178,7 @@ private:
     int m_displayBrightness = 50;                            ///< Default 50%
     int m_displayRotation = 0;                               ///< Default 0 degrees
     int m_aaProjectionFullscreenDelaySeconds = 0;            ///< 0 disables delayed fullscreen
+    bool m_debugTouchOverlayEnabled = false;                 ///< Default disabled
     int m_audioVolume = 50;                                  ///< Default 50%
     QString m_connectionPreference = QStringLiteral("USB");  ///< Default USB
     QString m_themeMode = QStringLiteral("DARK");            ///< Default dark

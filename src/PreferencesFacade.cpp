@@ -28,6 +28,7 @@ const char* KEY_DISPLAY_BRIGHTNESS = "slim_ui.display.brightness";
 const char* KEY_DISPLAY_ROTATION = "slim_ui.display.rotation";
 const char* KEY_AA_FULLSCREEN_DELAY_SECONDS =
     "slim_ui.display.aaFullscreenDelaySeconds";
+const char* KEY_DEBUG_TOUCH_OVERLAY_ENABLED = "slim_ui.debug.touchOverlayEnabled";
 const char* KEY_AUDIO_VOLUME = "slim_ui.audio.volume";
 const char* KEY_CONNECTION_PREFERENCE = "slim_ui.connection.preference";
 const char* KEY_THEME_MODE = "slim_ui.theme.mode";
@@ -36,6 +37,7 @@ const char* KEY_LAST_CONNECTED_DEVICE_ID = "slim_ui.device.lastConnected";
 const int DEFAULT_BRIGHTNESS = 50;
 const int DEFAULT_ROTATION = 0;
 const int DEFAULT_AA_FULLSCREEN_DELAY_SECONDS = 0;
+const bool DEFAULT_DEBUG_TOUCH_OVERLAY_ENABLED = false;
 const int DEFAULT_VOLUME = 50;
 const int MIN_PERCENTAGE = 0;
 const int MAX_PERCENTAGE = 100;
@@ -55,6 +57,10 @@ auto PreferencesFacade::displayRotation() const -> int { return m_displayRotatio
 
 auto PreferencesFacade::aaProjectionFullscreenDelaySeconds() const -> int {
     return m_aaProjectionFullscreenDelaySeconds;
+}
+
+auto PreferencesFacade::debugTouchOverlayEnabled() const -> bool {
+    return m_debugTouchOverlayEnabled;
 }
 
 auto PreferencesFacade::audioVolume() const -> int { return m_audioVolume; }
@@ -106,6 +112,21 @@ auto PreferencesFacade::setAaProjectionFullscreenDelaySeconds(int value) -> void
         QStringLiteral("AA fullscreen delay changed to %1 seconds")
             .arg(m_aaProjectionFullscreenDelaySeconds));
     emit aaProjectionFullscreenDelaySecondsChanged(m_aaProjectionFullscreenDelaySeconds);
+}
+
+auto PreferencesFacade::setDebugTouchOverlayEnabled(bool value) -> void {
+    if (value == m_debugTouchOverlayEnabled) {
+        return;
+    }
+
+    m_debugTouchOverlayEnabled = value;
+    saveSetting(KEY_DEBUG_TOUCH_OVERLAY_ENABLED, m_debugTouchOverlayEnabled);
+    Logger::instance().infoContext(
+        QStringLiteral("PreferencesFacade"),
+        QStringLiteral("Debug touch overlay changed to %1")
+            .arg(m_debugTouchOverlayEnabled ? QStringLiteral("enabled")
+                                            : QStringLiteral("disabled")));
+    emit debugTouchOverlayEnabledChanged(m_debugTouchOverlayEnabled);
 }
 
 auto PreferencesFacade::setAudioVolume(int value) -> void {
@@ -197,6 +218,8 @@ auto PreferencesFacade::loadSettings() -> void {
     m_displayRotation = validateRotation(loadSetting(KEY_DISPLAY_ROTATION, DEFAULT_ROTATION).toInt());
     m_aaProjectionFullscreenDelaySeconds = validateFullscreenDelaySeconds(
         loadSetting(KEY_AA_FULLSCREEN_DELAY_SECONDS, DEFAULT_AA_FULLSCREEN_DELAY_SECONDS).toInt());
+    m_debugTouchOverlayEnabled =
+        loadSetting(KEY_DEBUG_TOUCH_OVERLAY_ENABLED, DEFAULT_DEBUG_TOUCH_OVERLAY_ENABLED).toBool();
     m_audioVolume = validatePercentage(loadSetting(KEY_AUDIO_VOLUME, DEFAULT_VOLUME).toInt());
     m_connectionPreference =
         loadSetting(KEY_CONNECTION_PREFERENCE, QStringLiteral("USB")).toString();
@@ -240,6 +263,7 @@ auto PreferencesFacade::saveSettings() -> void {
     saveSetting(KEY_DISPLAY_BRIGHTNESS, m_displayBrightness);
     saveSetting(KEY_DISPLAY_ROTATION, m_displayRotation);
     saveSetting(KEY_AA_FULLSCREEN_DELAY_SECONDS, m_aaProjectionFullscreenDelaySeconds);
+    saveSetting(KEY_DEBUG_TOUCH_OVERLAY_ENABLED, m_debugTouchOverlayEnabled);
     saveSetting(KEY_AUDIO_VOLUME, m_audioVolume);
     saveSetting(KEY_CONNECTION_PREFERENCE, m_connectionPreference);
     saveSetting(KEY_THEME_MODE, m_themeMode);
@@ -257,6 +281,7 @@ auto PreferencesFacade::resetToDefaults() -> void {
     m_displayBrightness = DEFAULT_BRIGHTNESS;
     m_displayRotation = DEFAULT_ROTATION;
     m_aaProjectionFullscreenDelaySeconds = DEFAULT_AA_FULLSCREEN_DELAY_SECONDS;
+    m_debugTouchOverlayEnabled = DEFAULT_DEBUG_TOUCH_OVERLAY_ENABLED;
     m_audioVolume = DEFAULT_VOLUME;
     m_connectionPreference = QStringLiteral("USB");
     m_themeMode = QStringLiteral("DARK");
@@ -267,6 +292,7 @@ auto PreferencesFacade::resetToDefaults() -> void {
     emit displayBrightnessChanged(m_displayBrightness);
     emit displayRotationChanged(m_displayRotation);
     emit aaProjectionFullscreenDelaySecondsChanged(m_aaProjectionFullscreenDelaySeconds);
+    emit debugTouchOverlayEnabledChanged(m_debugTouchOverlayEnabled);
     emit audioVolumeChanged(m_audioVolume);
     emit connectionPreferenceChanged(m_connectionPreference);
     emit themeModeChanged(m_themeMode);

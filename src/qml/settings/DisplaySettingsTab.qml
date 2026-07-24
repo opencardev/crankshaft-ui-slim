@@ -108,6 +108,44 @@ Item {
                     }
                 }
             }
+
+            Components.SettingsCard {
+                Layout.fillWidth: true
+                title: qsTr("Touch Debug Overlay", "SettingsPanel")
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Show touch diagnostics on projection", "SettingsPanel")
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Switch {
+                            enabled: !!root.prefs
+                            checked: root.prefs ? root.prefs.debugTouchOverlayEnabled : false
+                            onToggled: {
+                                if (root.prefs) {
+                                    root.prefs.debugTouchOverlayEnabled = checked
+                                }
+                            }
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Overlays touch points and frame bounds for projection diagnostics.", "SettingsPanel")
+                        wrapMode: Text.WordWrap
+                        opacity: 0.75
+                    }
+                }
+            }
         }
     }
 }

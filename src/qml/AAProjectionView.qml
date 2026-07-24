@@ -46,10 +46,14 @@ Item {
     // TouchEventForwarder reference (set by parent or use global _touchForwarder)
     property var touchForwarder: _touchForwarder
     property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
-    readonly property bool debugTouchOverlayEnabled:
+    readonly property bool debugTouchOverlayOverride:
         ((typeof _debugTouchOverlay !== "undefined") && _debugTouchOverlay) ||
         (Qt.application && Qt.application.arguments &&
          Qt.application.arguments.indexOf("--debug-touch-overlay") !== -1)
+    readonly property bool debugTouchOverlayEnabled:
+        debugTouchOverlayOverride ||
+        ((typeof _preferencesFacade !== "undefined") &&
+         _preferencesFacade && _preferencesFacade.debugTouchOverlayEnabled)
     property string debugLastEventType: ""
     property var debugLastGeometry: ({ valid: false, left: 0, top: 0, width: 0, height: 0 })
     property var debugMappedPoints: []
@@ -155,6 +159,10 @@ Item {
 
     function updateTouchDebugState(eventType, geometry, mappedPoints, status) {
         if (!debugTouchOverlayEnabled) {
+            debugLastEventType = ""
+            debugLastGeometry = { valid: false, left: 0, top: 0, width: 0, height: 0 }
+            debugMappedPoints = []
+            debugGeometryStatus = ""
             return
         }
 
