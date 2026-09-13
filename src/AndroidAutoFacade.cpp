@@ -23,6 +23,9 @@
 #include "Logger.h"
 #include "ServiceProvider.h"
 
+#include <memory>
+#include <QVideoSink>
+
 namespace {
 constexpr int kProjectionFrameIntervalMs = 33;
 }
@@ -38,7 +41,9 @@ AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* 
       m_isProjectionReady(false),
       m_projectionFrameUrl(),
       m_projectionWidth(0),
-      m_projectionHeight(0) {
+      m_projectionHeight(0),
+      m_h264Renderer(std::make_unique<QVideoSinkProjectionVideoRenderer>(this)),
+      m_h264Decoder(std::make_unique<H264VideoDecoder>(this)) {
     if (!m_serviceProvider) {
         Logger::instance().errorContext("AndroidAutoFacade", "ServiceProvider is null");
         return;
@@ -90,6 +95,20 @@ auto AndroidAutoFacade::isWebRtcPreferred() const -> bool {
 
 auto AndroidAutoFacade::hasProjectionFallbackFrame() const -> bool {
     return !m_projectionFrameUrl.isEmpty();
+}
+
+auto AndroidAutoFacade::projectionVideoSink() const -> QObject* {
+    return m_h264Renderer ? m_h264Renderer->surfaceObject() : nullptr;
+}
+
+void AndroidAutoFacade::setProjectionVideoSink(QObject* sink) {
+    auto* videoSink = qobject_cast<QVideoSink*>(sink);
+    if (m_h264Renderer && videoSink) {
+        m_h264Renderer->setVideoSink(videoSink);
+        Logger::instance().infoContext("AndroidAutoFacade", "Bound H.264 decoder to QML video sink");
+    } else {
+        Logger::instance().errorContext("AndroidAutoFacade", "Failed to bind H.264 decoder to QML video sink");
+    }
 }
 
 // Q_INVOKABLE methods
@@ -267,6 +286,40 @@ auto AndroidAutoFacade::onCoreVideoStateChanged(bool active) -> void {
     }
 }
 
+auto AndroidAutoFacade::onCoreH264VideoFrameReceived(const QByteArray& frameData, int width, int height)
+    -> void {
+    if (!m_h264Decoder || frameData.isEmpty()) return;
+    if (!m_loggedFirstH264Input) {
+        m_loggedFirstH264Input = true;
+        Logger::instance().infoContext(
+            "AndroidAutoFacade", "First H.264 frame received by facade",
+            {{"payload_size", frameData.size()},
+             {"prefix_hex", QString::fromLatin1(frameData.left(16).toHex())}});
+    }
+    if (!m_isVideoActive) {
+        m_isVideoActive = true;
+        emit isVideoActiveChanged(m_isVideoActive);
+    }
+    m_projectionWidth = width;
+    m_projectionHeight = height;
+    emit projectionFrameChanged(m_projectionWidth, m_projectionHeight);
+    m_h264Decoder->pushFrame(frameData, width, height);
+}
+
+auto AndroidAutoFacade::onDecodedH264Frame(const QImage& image, int width, int height) -> void {
+    if (!m_h264Renderer) return;
+    if (!m_loggedFirstDecodedH264Frame) {
+        m_loggedFirstDecodedH264Frame = true;
+        Logger::instance().infoContext("AndroidAutoFacade", "First H.264 frame decoded");
+    }
+    m_h264Renderer->presentImage(image);
+    if (m_projectionWidth != width || m_projectionHeight != height) {
+        m_projectionWidth = width;
+        m_projectionHeight = height;
+        emit projectionFrameChanged(width, height);
+    }
+}
+
 auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int width, int height)
     -> void {
     if (!frameUrl.isEmpty() && m_videoInactiveDebounceTimer.isActive()) {
@@ -440,6 +493,15 @@ auto AndroidAutoFacade::setupEventBusConnections() -> void {
             &AndroidAutoFacade::onCoreVideoStateChanged);
         connect(coreClient, &CoreClient::videoFrameReceived, this,
             &AndroidAutoFacade::onCoreVideoFrameReceived);
+        connect(coreClient, &CoreClient::videoH264FrameReceived, this,
+            &AndroidAutoFacade::onCoreH264VideoFrameReceived);
+        connect(m_h264Decoder.get(), &H264VideoDecoder::frameReady, this,
+            &AndroidAutoFacade::onDecodedH264Frame);
+        connect(m_h264Decoder.get(), &H264VideoDecoder::errorOccurred, this,
+            [](const QString& error) {
+                Logger::instance().errorContext("AndroidAutoFacade",
+                                                QString("H.264 decoder error: %1").arg(error));
+            });
         connect(coreClient, &CoreClient::videoTransportModeChanged, this,
             &AndroidAutoFacade::onCoreVideoTransportModeChanged);
         connect(coreClient, &CoreClient::webRtcSignalingReceived, this,

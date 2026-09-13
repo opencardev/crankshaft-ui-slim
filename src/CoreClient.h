@@ -73,6 +73,7 @@ signals:
     void videoStateChanged(bool active);
     void projectionReadyChanged(bool ready);
     void videoFrameReceived(const QString& frameUrl, int width, int height);
+    void videoH264FrameReceived(const QByteArray& frameData, int width, int height);
     void videoTransportModeChanged(const QString& mode);
     void webRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void connectionError(const QString& error);

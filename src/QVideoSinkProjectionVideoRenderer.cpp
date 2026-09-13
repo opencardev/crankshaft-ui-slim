@@ -32,6 +32,12 @@ auto QVideoSinkProjectionVideoRenderer::surfaceObject() const -> QObject* {
     return m_videoSink;
 }
 
+auto QVideoSinkProjectionVideoRenderer::setVideoSink(QVideoSink* videoSink) -> void {
+    if (videoSink) {
+        m_videoSink = videoSink;
+    }
+}
+
 auto QVideoSinkProjectionVideoRenderer::presentImage(const QImage& image) -> void {
     if (image.isNull()) {
         clear();

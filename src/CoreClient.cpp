@@ -820,7 +820,25 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const int width = payload.value("width").toInt();
             const int height = payload.value("height").toInt();
 
-            if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
+            if (!encodedData.isEmpty() && encoding == "h264-base64") {
+                const QByteArray frameData = QByteArray::fromBase64(encodedData.toLatin1());
+                if (!frameData.isEmpty()) {
+                    if (!m_hasLoggedFirstVideoFrame) {
+                        m_hasLoggedFirstVideoFrame = true;
+                        Logger::instance().infoContext(
+                            "CoreClient", "First android-auto/media/video-frame event received",
+                            {{"encoding", encoding},
+                             {"width", width},
+                             {"height", height},
+                             {"payload_size", encodedData.size()}});
+                    }
+                    emit videoH264FrameReceived(frameData, width, height);
+                    if (!m_videoReady) {
+                        m_videoReady = true;
+                        emit videoStateChanged(true);
+                    }
+                }
+            } else if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
                 if (!m_hasLoggedFirstVideoFrame) {
                     m_hasLoggedFirstVideoFrame = true;
                     Logger::instance().infoContext(

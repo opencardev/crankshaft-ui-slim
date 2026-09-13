@@ -21,6 +21,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtMultimedia
 import QtQuick.Window
 import "components"
 
@@ -405,6 +406,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     color: theme.colors.background
                     readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
+                    readonly property bool h264Selected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "websocket-h264"
                     readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
                     readonly property bool webRtcFallbackRequested: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
                     readonly property int webRtcFallbackDelayMs: 2500
@@ -518,10 +520,10 @@ ApplicationWindow {
                         }
 
                         var videoRect = videoContentRect()
-                        var mappedWidth = webRtcActive && videoRect.width > 0
+                        var mappedWidth = (webRtcActive || h264Selected) && videoRect.width > 0
                             ? videoRect.width
                             : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var mappedHeight = webRtcActive && videoRect.height > 0
+                        var mappedHeight = (webRtcActive || h264Selected) && videoRect.height > 0
                             ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
                         _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
@@ -537,10 +539,10 @@ ApplicationWindow {
 
                     function mapToProjectionCoordinates(rawX, rawY) {
                         var videoRect = videoContentRect()
-                        var frameWidth = webRtcActive && videoRect.width > 0
+                        var frameWidth = (webRtcActive || h264Selected) && videoRect.width > 0
                             ? videoRect.width
                             : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var frameHeight = webRtcActive && videoRect.height > 0
+                        var frameHeight = (webRtcActive || h264Selected) && videoRect.height > 0
                             ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
 
@@ -548,10 +550,10 @@ ApplicationWindow {
                             return { x: 0, y: 0 }
                         }
 
-                        var frameLeft = webRtcActive && videoRect.width > 0
+                        var frameLeft = (webRtcActive || h264Selected) && videoRect.width > 0
                             ? videoRect.x
                             : (projectionImage.width - frameWidth) / 2
-                        var frameTop = webRtcActive && videoRect.height > 0
+                        var frameTop = (webRtcActive || h264Selected) && videoRect.height > 0
                             ? videoRect.y
                             : (projectionImage.height - frameHeight) / 2
 
@@ -701,6 +703,21 @@ ApplicationWindow {
                         }
                     }
 
+                    VideoOutput {
+                        id: h264VideoOutput
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectFit
+                        visible: projectionSurface.h264Selected
+
+                        Component.onCompleted: {
+                            if (_androidAutoFacade) {
+                                _androidAutoFacade.setProjectionVideoSink(videoSink)
+                            }
+                        }
+
+                        onContentRectChanged: projectionSurface.updateTouchForwarderDisplaySize()
+                    }
+
                     Connections {
                         target: projectionVideoLoader.item
                         ignoreUnknownSignals: true
@@ -720,7 +737,7 @@ ApplicationWindow {
                         // Keep the frame swap synchronous so the inline projection
                         // surface does not flash between successive video frames.
                         asynchronous: false
-                        visible: !projectionSurface.webRtcActive && source !== ""
+                        visible: !projectionSurface.webRtcActive && !projectionSurface.h264Selected && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
@@ -745,7 +762,7 @@ ApplicationWindow {
                         font.pixelSize: theme.typography.h4
                         font.family: theme.typography.fontFamily
                         horizontalAlignment: Text.AlignHCenter
-                        visible: (!projectionSurface.webRtcActive && !projectionImage.visible) ||
+                        visible: (!projectionSurface.webRtcActive && !projectionSurface.h264Selected && !projectionImage.visible) ||
                                  (projectionSurface.webRtcActive && projectionSurface.videoContentRect().width <= 0)
                     }
 
