@@ -20,6 +20,7 @@
 #pragma once
 
 #include <QVideoSink>
+#include <QElapsedTimer>
 
 #include "ProjectionVideoRenderer.h"
 
@@ -35,4 +36,10 @@ public:
 
 private:
     QVideoSink* m_videoSink{nullptr};
+
+    // Diagnostics only: measure producer rate, queued delivery rate, and
+    // queued-call latency without changing the rendering behaviour.
+    QElapsedTimer m_diagnosticTimer;
+    quint64 m_presentCount{0};
+    quint64 m_queuedDeliveryCount{0};
 };

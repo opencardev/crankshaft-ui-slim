@@ -12,6 +12,7 @@
 #include <QByteArray>
 #include <QImage>
 #include <QString>
+#include <QHash>
 
 #include <gst/gst.h>
 
@@ -60,4 +61,10 @@ private:
     quint64 m_parserInputBufferCount{0};
     quint64 m_decoderInputBufferCount{0};
     quint64 m_decoderOutputBufferCount{0};
+    quint64 m_decoderTimingSampleCount{0};
+    quint64 m_conversionTimingSampleCount{0};
+    QHash<quint64, qint64> m_decoderStartTimesNs;
+    QHash<QString, qint64> m_stageLastNs;
+    QHash<QString, quint64> m_stageCounts;
+    qint64 m_lastPushNs{0};
 };

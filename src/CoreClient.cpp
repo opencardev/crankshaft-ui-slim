@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QUrl>
 #include <QTimer>
+#include <QThread>
 
 #include "Logger.h"
 
@@ -631,6 +632,22 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
         QString topic = obj.value("topic").toString();
         QJsonObject payload = obj.value("payload").toObject();
 
+        if (topic == "android-auto/media/video-frame") {
+            ++m_h264EventCount;
+            const qint64 eventIntervalMs =
+                m_lastH264EventArrival.isValid() ? m_lastH264EventArrival.elapsed() : -1;
+            m_lastH264EventArrival.restart();
+
+            if (m_h264EventCount == 1 || (m_h264EventCount % 30) == 0) {
+                Logger::instance().infoContext(
+                    "CoreClient", "H.264 media event arrival cadence",
+                    {{"count", m_h264EventCount},
+                     {"interval_ms", eventIntervalMs},
+                     {"core_thread",
+                      QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+            }
+        }
+
         Logger::instance().debugContext("CoreClient", QString("Received event: %1").arg(topic));
 
         if (topic == "android-auto/status/state-changed") {
@@ -821,8 +838,27 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const int height = payload.value("height").toInt();
 
             if (!encodedData.isEmpty() && encoding == "h264-base64") {
+                QElapsedTimer h264Base64Timer;
+                h264Base64Timer.start();
                 const QByteArray frameData = QByteArray::fromBase64(encodedData.toLatin1());
+                const qint64 h264Base64ElapsedMs = h264Base64Timer.elapsed();
                 if (!frameData.isEmpty()) {
+                    ++m_h264EmitCount;
+                    const qint64 emitIntervalMs =
+                        m_lastH264Emit.isValid() ? m_lastH264Emit.elapsed() : -1;
+                    m_lastH264Emit.restart();
+
+                    if (m_h264EmitCount == 1 || (m_h264EmitCount % 30) == 0) {
+                        Logger::instance().infoContext(
+                            "CoreClient", "H.264 frame emission cadence",
+                            {{"count", m_h264EmitCount},
+                             {"emit_interval_ms", emitIntervalMs},
+                             {"base64_decode_ms", h264Base64ElapsedMs},
+                             {"encoded_size", encodedData.size()},
+                             {"decoded_size", frameData.size()},
+                             {"core_thread",
+                              QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+                    }
                     if (!m_hasLoggedFirstVideoFrame) {
                         m_hasLoggedFirstVideoFrame = true;
                         Logger::instance().infoContext(

@@ -128,6 +128,7 @@ public:
     [[nodiscard]] auto hasProjectionFallbackFrame() const -> bool;
     [[nodiscard]] auto projectionVideoSink() const -> QObject*;
     Q_INVOKABLE void setProjectionVideoSink(QObject* sink);
+    Q_INVOKABLE void logProjectionVideoSinkState();
 
     /**
      * @brief Q_INVOKABLE methods for QML interface
@@ -252,6 +253,9 @@ private:
     bool m_loggedFirstH264Input = false;
     bool m_loggedFirstDecodedH264Frame = false;
     int m_projectionFrameIntervalMs = 33;
+    int m_loggedQmlSinkFrameCount = 0;
+    quint64 m_h264InputArrivalCount = 0;
+    QElapsedTimer m_lastH264InputArrival;
 };
 
 #endif  // ANDROIDAUTOFACADE_H

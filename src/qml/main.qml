@@ -710,12 +710,20 @@ ApplicationWindow {
                         visible: projectionSurface.h264Selected
 
                         Component.onCompleted: {
-                            if (_androidAutoFacade) {
-                                _androidAutoFacade.setProjectionVideoSink(videoSink)
-                            }
-                        }
+          console.log("[H264-DIAG] VideoOutput completed; videoSink=", videoSink,
+                      "contentRect=", contentRect)
+          if (_androidAutoFacade) {
+              _androidAutoFacade.setProjectionVideoSink(videoSink)
+              _androidAutoFacade.logProjectionVideoSinkState()
+          } else {
+              console.log("[H264-DIAG] _androidAutoFacade is null")
+          }
+      }
 
-                        onContentRectChanged: projectionSurface.updateTouchForwarderDisplaySize()
+      onContentRectChanged: {
+          console.log("[H264-DIAG] contentRectChanged:", contentRect)
+          projectionSurface.updateTouchForwarderDisplaySize()
+      }
                     }
 
                     Connections {

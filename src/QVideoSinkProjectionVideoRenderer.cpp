@@ -22,8 +22,12 @@
 #include <QVideoFrameFormat>
 #include <QVideoFrame>
 
+#include "Logger.h"
+
 #include <algorithm>
 #include <cstring>
+#include <QMetaObject>
+#include <QThread>
 
 QVideoSinkProjectionVideoRenderer::QVideoSinkProjectionVideoRenderer(QObject* parent)
     : ProjectionVideoRenderer(parent), m_videoSink(new QVideoSink(this)) {}
@@ -44,13 +48,27 @@ auto QVideoSinkProjectionVideoRenderer::presentImage(const QImage& image) -> voi
         return;
     }
 
-    const QImage frameImage = image.format() == QImage::Format_RGBA8888
+    // QImage has no Format_BGRA8888. On little-endian ARM64,
+    // Format_ARGB32 has BGRA byte layout in memory.
+    const QImage frameImage = image.format() == QImage::Format_ARGB32
         ? image
-        : image.convertToFormat(QImage::Format_RGBA8888);
+        : image.convertToFormat(QImage::Format_ARGB32);
 
-    QVideoFrameFormat format(frameImage.size(), QVideoFrameFormat::Format_RGBA8888);
+    QVideoFrameFormat format(frameImage.size(), QVideoFrameFormat::Format_BGRA8888);
     QVideoFrame frame(format);
-    if (!frame.isValid() || !frame.map(QVideoFrame::WriteOnly)) {
+    if (!frame.isValid()) {
+        Logger::instance().errorContext("QVideoSinkProjectionVideoRenderer",
+                                        "Constructed QVideoFrame is invalid",
+                                        {{"width", frameImage.width()},
+                                         {"height", frameImage.height()},
+                                         {"format", "BGRA8888"}});
+        clear();
+        return;
+    }
+
+    if (!frame.map(QVideoFrame::WriteOnly)) {
+        Logger::instance().errorContext("QVideoSinkProjectionVideoRenderer",
+                                        "Failed to map QVideoFrame for writing");
         clear();
         return;
     }
@@ -63,7 +81,84 @@ auto QVideoSinkProjectionVideoRenderer::presentImage(const QImage& image) -> voi
     }
     frame.unmap();
 
-    m_videoSink->setVideoFrame(frame);
+    if (!m_videoSink) {
+        Logger::instance().errorContext("QVideoSinkProjectionVideoRenderer",
+                                        "No QVideoSink is attached");
+        return;
+    }
+
+    if (!m_diagnosticTimer.isValid()) {
+        m_diagnosticTimer.start();
+    }
+
+    ++m_presentCount;
+    if (m_presentCount == 1 || (m_presentCount % 30) == 0) {
+        const qint64 elapsedMs = m_diagnosticTimer.elapsed();
+        const double fps = elapsedMs > 0
+            ? (static_cast<double>(m_presentCount) * 1000.0 / static_cast<double>(elapsedMs))
+            : 0.0;
+        Logger::instance().infoContext(
+            "QVideoSinkProjectionVideoRenderer",
+            "H264 renderer presentImage rate",
+            {{"count", static_cast<qulonglong>(m_presentCount)},
+             {"elapsed_ms", elapsedMs},
+             {"approx_fps", QString::number(fps, 'f', 2)},
+             {"width", frameImage.width()},
+             {"height", frameImage.height()},
+             {"thread", QString::number(reinterpret_cast<quintptr>(QThread::currentThreadId()))}});
+    }
+
+    // Queue the update onto the QVideoSink QObject thread so the QML boundary
+    // is explicitly crossed using Qt's event queue.
+    QVideoSink* sink = m_videoSink;
+    const qint64 enqueueMs = m_diagnosticTimer.elapsed();
+    const quint64 enqueueCount = m_presentCount;
+    const bool queued = QMetaObject::invokeMethod(
+        sink,
+        [this, sink, frame, enqueueMs, enqueueCount]() {
+            sink->setVideoFrame(frame);
+
+            ++m_queuedDeliveryCount;
+            if (m_queuedDeliveryCount == 1 || (m_queuedDeliveryCount % 30) == 0) {
+                const qint64 nowMs = m_diagnosticTimer.elapsed();
+                const qint64 queueDelayMs = nowMs - enqueueMs;
+                Logger::instance().infoContext(
+                    "QVideoSinkProjectionVideoRenderer",
+                    "QVideoSink queued delivery rate",
+                    {{"delivery_count", static_cast<qulonglong>(m_queuedDeliveryCount)},
+                     {"source_count", static_cast<qulonglong>(enqueueCount)},
+                     {"elapsed_ms", nowMs},
+                     {"queue_delay_ms", queueDelayMs},
+                     {"sink_thread", QString::number(
+                         reinterpret_cast<quintptr>(QThread::currentThreadId()))}});
+            }
+
+            const QVideoFrame current = sink->videoFrame();
+            if (m_queuedDeliveryCount == 1 || (m_queuedDeliveryCount % 30) == 0) {
+                Logger::instance().infoContext(
+                    "QVideoSinkProjectionVideoRenderer",
+                    "QVideoSink frame after queued setVideoFrame",
+                    {{"sink", QString::number(reinterpret_cast<quintptr>(sink))},
+                     {"current_valid", current.isValid()},
+                     {"current_width", current.width()},
+                     {"current_height", current.height()},
+                     {"current_pixel_format", static_cast<int>(current.pixelFormat())}});
+            }
+        },
+        Qt::QueuedConnection);
+
+    if (m_presentCount == 1 || (m_presentCount % 30) == 0) {
+        Logger::instance().infoContext(
+            "QVideoSinkProjectionVideoRenderer",
+            "QVideoFrame queued to QML QVideoSink",
+            {{"count", static_cast<qulonglong>(m_presentCount)},
+             {"sink", QString::number(reinterpret_cast<quintptr>(sink))},
+             {"queued", queued},
+             {"sink_thread", QString::number(reinterpret_cast<quintptr>(sink->thread()))},
+             {"current_thread", QString::number(
+                 reinterpret_cast<quintptr>(QThread::currentThread()))}});
+    }
+
 }
 
 auto QVideoSinkProjectionVideoRenderer::clear() -> void {

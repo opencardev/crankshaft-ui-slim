@@ -13,6 +13,7 @@
 #include <gst/video/video.h>
 
 #include <QMutexLocker>
+#include <QElapsedTimer>
 #include <QVideoFrameFormat>
 
 #include <cstring>
@@ -21,6 +22,13 @@
 
 namespace {
 constexpr guint kMaxBuffers = 2;
+
+[[nodiscard]] qint64 monotonicNs() {
+    static QElapsedTimer timer;
+    static const bool started = (timer.start(), true);
+    Q_UNUSED(started);
+    return timer.nsecsElapsed();
+}
 }
 
 H264VideoDecoder::H264VideoDecoder(QObject* parent) : QObject(parent) {
@@ -76,7 +84,7 @@ auto H264VideoDecoder::initialise() -> bool {
     g_object_set(G_OBJECT(m_h264parse), "config-interval", -1, nullptr);
 
     GstCaps* sinkCaps = gst_caps_new_simple("video/x-raw",
-                                            "format", G_TYPE_STRING, "RGBA",
+                                            "format", G_TYPE_STRING, "BGRA",
                                             nullptr);
     g_object_set(G_OBJECT(m_appsink),
                  "caps", sinkCaps,
@@ -132,7 +140,7 @@ auto H264VideoDecoder::initialise() -> bool {
         "H264VideoDecoder", "GStreamer H.264 pipeline is PLAYING",
         {{"input_caps", "video/x-h264,stream-format=byte-stream,alignment=nal"},
          {"decoder", "avdec_h264"},
-         {"output_caps", "video/x-raw,format=RGBA"}});
+         {"output_caps", "video/x-raw,format=BGRA"}});
     return true;
 }
 
@@ -158,8 +166,21 @@ auto H264VideoDecoder::pushFrame(const QByteArray& data, int width, int height) 
     std::memcpy(map.data, data.constData(), static_cast<size_t>(data.size()));
     gst_buffer_unmap(buffer, &map);
 
+    const qint64 pushNowNs = monotonicNs();
+    const qint64 pushIntervalMs =
+        m_lastPushNs > 0 ? (pushNowNs - m_lastPushNs) / 1000000 : -1;
+    m_lastPushNs = pushNowNs;
+
     const GstFlowReturn result = gst_app_src_push_buffer(GST_APP_SRC(m_appsrc), buffer);
     ++m_pushedFrameCount;
+    if (m_pushedFrameCount == 1 || (m_pushedFrameCount % 30) == 0) {
+        Logger::instance().infoContext(
+            "H264VideoDecoder", "H.264 appsrc push cadence",
+            {{"count", static_cast<qulonglong>(m_pushedFrameCount)},
+             {"interval_ms", pushIntervalMs},
+             {"bytes", data.size()},
+             {"flow", static_cast<int>(result)}});
+    }
     if (m_pushedFrameCount == 1 || (m_pushedFrameCount % 120) == 0) {
         Logger::instance().debugContext(
             "H264VideoDecoder", "Pushed encoded H.264 buffer to appsrc",
@@ -242,6 +263,41 @@ auto H264VideoDecoder::onPadProbe(GstPad* pad, GstPadProbeInfo* info, gpointer u
     if ((GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER) != 0) {
         GstBuffer* buffer = GST_PAD_PROBE_INFO_BUFFER(info);
         quint64* count = nullptr;
+        QString stage;
+        if (elementName == QStringLiteral("h264-source")) {
+            stage = QStringLiteral("appsrc-src");
+        } else if (elementName == QStringLiteral("h264-parse") &&
+                   padName == QStringLiteral("sink")) {
+            stage = QStringLiteral("h264parse-sink");
+        } else if (elementName == QStringLiteral("h264-parse")) {
+            stage = QStringLiteral("h264parse-src");
+        } else if (elementName == QStringLiteral("h264-decoder") &&
+                   padName == QStringLiteral("sink")) {
+            stage = QStringLiteral("decoder-sink");
+        } else if (elementName == QStringLiteral("h264-decoder") &&
+                   padName == QStringLiteral("src")) {
+            stage = QStringLiteral("decoder-src");
+        }
+
+        if (!stage.isEmpty()) {
+            const qint64 nowNs = monotonicNs();
+            const auto previous = self->m_stageLastNs.value(stage, -1);
+            const qint64 intervalMs =
+                previous >= 0 ? (nowNs - previous) / 1000000 : -1;
+            self->m_stageLastNs.insert(stage, nowNs);
+
+            const quint64 count = ++self->m_stageCounts[stage];
+            if (count == 1 || (count % 30) == 0) {
+                Logger::instance().infoContext(
+                    "H264VideoDecoder", "GStreamer stage cadence",
+                    {{"stage", stage},
+                     {"count", static_cast<qulonglong>(count)},
+                     {"interval_ms", intervalMs},
+                     {"bytes", static_cast<qulonglong>(
+                                   buffer ? gst_buffer_get_size(buffer) : 0)}});
+            }
+        }
+
         if (elementName == QStringLiteral("h264-source")) {
             count = &self->m_sourceBufferCount;
         } else if (elementName == QStringLiteral("h264-parse") && padName == QStringLiteral("sink")) {
@@ -250,8 +306,39 @@ auto H264VideoDecoder::onPadProbe(GstPad* pad, GstPadProbeInfo* info, gpointer u
             count = &self->m_parserBufferCount;
         } else if (elementName == QStringLiteral("h264-decoder") && padName == QStringLiteral("sink")) {
             count = &self->m_decoderInputBufferCount;
+            if (buffer) {
+                const guint64 pts = GST_BUFFER_PTS_IS_VALID(buffer)
+                    ? GST_BUFFER_PTS(buffer)
+                    : GST_CLOCK_TIME_NONE;
+                if (pts != GST_CLOCK_TIME_NONE) {
+                    self->m_decoderStartTimesNs.insert(pts, monotonicNs());
+                }
+            }
         } else if (elementName == QStringLiteral("h264-decoder") && padName == QStringLiteral("src")) {
             count = &self->m_decoderOutputBufferCount;
+            if (buffer) {
+                const guint64 pts = GST_BUFFER_PTS_IS_VALID(buffer)
+                    ? GST_BUFFER_PTS(buffer)
+                    : GST_CLOCK_TIME_NONE;
+                if (pts != GST_CLOCK_TIME_NONE) {
+                    const auto it = self->m_decoderStartTimesNs.find(pts);
+                    if (it != self->m_decoderStartTimesNs.end()) {
+                        const qint64 elapsedUs = (monotonicNs() - it.value()) / 1000;
+                        self->m_decoderStartTimesNs.erase(it);
+                        ++self->m_decoderTimingSampleCount;
+                        if (self->m_decoderTimingSampleCount == 1 ||
+                            (self->m_decoderTimingSampleCount % 30) == 0) {
+                            Logger::instance().infoContext(
+                                "H264VideoDecoder", "H.264 decoder input-to-output timing",
+                                {{"count", static_cast<qulonglong>(self->m_decoderTimingSampleCount)},
+                                 {"elapsed_us", elapsedUs},
+                                 {"elapsed_ms", elapsedUs / 1000.0},
+                                 {"width", self->m_width},
+                                 {"height", self->m_height}});
+                        }
+                    }
+                }
+            }
         }
 
         if (count) {
@@ -305,10 +392,25 @@ auto H264VideoDecoder::handleSample(GstSample* sample) -> GstFlowReturn {
         return GST_FLOW_ERROR;
     }
 
-    QImage image(width, height, QImage::Format_RGBA8888);
+    const qint64 conversionStartNs = monotonicNs();
+    QImage image(width, height, QImage::Format_ARGB32);
     for (int y = 0; y < height; ++y) {
         std::memcpy(image.scanLine(y), map.data + (y * sourceStride),
                     static_cast<size_t>(rowBytes));
+    }
+    const qint64 conversionElapsedUs = (monotonicNs() - conversionStartNs) / 1000;
+    ++m_conversionTimingSampleCount;
+    if (m_conversionTimingSampleCount == 1 ||
+        (m_conversionTimingSampleCount % 30) == 0) {
+        Logger::instance().infoContext(
+            "H264VideoDecoder", "Decoded BGRA to QImage conversion timing",
+            {{"count", static_cast<qulonglong>(m_conversionTimingSampleCount)},
+             {"elapsed_us", conversionElapsedUs},
+             {"elapsed_ms", conversionElapsedUs / 1000.0},
+             {"width", width},
+             {"height", height},
+             {"source_stride", sourceStride},
+             {"row_bytes", rowBytes}});
     }
 
     gst_buffer_unmap(buffer, &map);

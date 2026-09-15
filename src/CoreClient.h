@@ -24,6 +24,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QSet>
 #include <QString>
 #include <QTimer>
@@ -110,6 +111,10 @@ private:
     int m_reconnectAttempt = 0;
     qint64 m_lastReconnectLogMs = 0;
     bool m_hasLoggedFirstVideoFrame = false;
+    quint64 m_h264EventCount = 0;
+    quint64 m_h264EmitCount = 0;
+    QElapsedTimer m_lastH264EventArrival;
+    QElapsedTimer m_lastH264Emit;
     bool m_projectionReady = false;
     bool m_videoReady = false;
     bool m_audioReady = false;
