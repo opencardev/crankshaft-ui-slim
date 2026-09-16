@@ -117,6 +117,8 @@ qt_add_executable(crankshaft-ui-slim
     AndroidAutoWebRtcReceiver.cpp
     ProjectionVideoRenderer.h
     QVideoSinkProjectionVideoRenderer.h
+    H264VideoDecoder.h
+    H264VideoDecoder.cpp
     QVideoSinkProjectionVideoRenderer.cpp
     PreferencesFacade.h
     PreferencesFacade.cpp

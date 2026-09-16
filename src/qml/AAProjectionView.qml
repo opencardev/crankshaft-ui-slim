@@ -47,6 +47,7 @@ Item {
     property var touchForwarder: _touchForwarder
     property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
     readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
+    readonly property bool h264Selected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "websocket-h264"
     readonly property bool webRtcHealthy: androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active && androidAutoWebRtcReceiver.healthy
     readonly property bool webRtcFallbackActive: webRtcSelected && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.fallbackRecommended
     readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
@@ -73,13 +74,6 @@ Item {
             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height)
         touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
-        var aaWidth = androidAutoFacade && androidAutoFacade.projectionWidth > 0
-            ? androidAutoFacade.projectionWidth
-            : mappedWidth
-        var aaHeight = androidAutoFacade && androidAutoFacade.projectionHeight > 0
-            ? androidAutoFacade.projectionHeight
-            : mappedHeight
-        touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
     }
 
     // updateTouchForwarderDisplaySize() is called from onPaintedWidthChanged /
@@ -119,8 +113,10 @@ Item {
         id: projectionVideoOutput
         anchors.fill: parent
         fillMode: VideoOutput.PreserveAspectFit
-        visible: webRtcActive
-        videoSink: androidAutoWebRtcReceiver ? androidAutoWebRtcReceiver.videoSinkObject : null
+        visible: webRtcActive || h264Selected
+        videoSink: webRtcActive
+            ? (androidAutoWebRtcReceiver ? androidAutoWebRtcReceiver.videoSinkObject : null)
+            : (androidAutoFacade ? androidAutoFacade.projectionVideoSink : null)
 
         onContentRectChanged: projectionView.updateTouchForwarderDisplaySize()
     }
@@ -136,7 +132,7 @@ Item {
         // Decode each frame synchronously to avoid blanking between rapidly
         // changing data URLs on the projection surface.
         asynchronous: false
-        visible: (!webRtcActive || webRtcFallbackActive) && source !== ""
+        visible: (!webRtcActive && !h264Selected || webRtcFallbackActive) && source !== ""
 
         onPaintedWidthChanged: projectionView.updateTouchForwarderDisplaySize()
         onPaintedHeightChanged: projectionView.updateTouchForwarderDisplaySize()

@@ -21,6 +21,10 @@
 #define ANDROIDAUTOFACADE_H
 
 #include <QObject>
+#include <memory>
+
+#include "H264VideoDecoder.h"
+#include "QVideoSinkProjectionVideoRenderer.h"
 #include <QElapsedTimer>
 #include <QString>
 #include <QTimer>
@@ -94,6 +98,7 @@ class AndroidAutoFacade : public QObject {
      * @brief True when a JPEG fallback frame is currently available for rendering.
      */
     Q_PROPERTY(bool hasProjectionFallbackFrame READ hasProjectionFallbackFrame NOTIFY projectionFrameUrlChanged)
+    Q_PROPERTY(QObject* projectionVideoSink READ projectionVideoSink CONSTANT)
 
 public:
     enum ConnectionState {
@@ -121,6 +126,9 @@ public:
     [[nodiscard]] auto projectionHeight() const -> int;
     [[nodiscard]] auto isWebRtcPreferred() const -> bool;
     [[nodiscard]] auto hasProjectionFallbackFrame() const -> bool;
+    [[nodiscard]] auto projectionVideoSink() const -> QObject*;
+    Q_INVOKABLE void setProjectionVideoSink(QObject* sink);
+    Q_INVOKABLE void logProjectionVideoSinkState();
 
     /**
      * @brief Q_INVOKABLE methods for QML interface
@@ -205,6 +213,8 @@ private slots:
     void onCoreDeviceRemoved(const QString& deviceId);
     void onCoreVideoStateChanged(bool active);
     void onCoreVideoFrameReceived(const QString& frameUrl, int width, int height);
+    void onCoreH264VideoFrameReceived(const QByteArray& frameData, int width, int height);
+    void onDecodedH264Frame(const QImage& image, int width, int height);
     void onCoreVideoTransportModeChanged(const QString& mode);
     void onCoreWebRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void onCoreAudioStateChanged(bool active);
@@ -218,6 +228,7 @@ private:
     auto updateConnectionState(int newState) -> void;
     auto reportError(const QString& errorMessage) -> void;
     auto dispatchProjectionFrame(const QString& frameUrl, int width, int height) -> void;
+    auto clearProjectionVideoSink() -> void;
 
     ServiceProvider* m_serviceProvider;
     int m_connectionState;
@@ -237,7 +248,14 @@ private:
     int m_pendingProjectionWidth = 0;
     int m_pendingProjectionHeight = 0;
     bool m_hasPendingProjectionFrame = false;
+    std::unique_ptr<QVideoSinkProjectionVideoRenderer> m_h264Renderer;
+    std::unique_ptr<H264VideoDecoder> m_h264Decoder;
+    bool m_loggedFirstH264Input = false;
+    bool m_loggedFirstDecodedH264Frame = false;
     int m_projectionFrameIntervalMs = 33;
+    int m_loggedQmlSinkFrameCount = 0;
+    quint64 m_h264InputArrivalCount = 0;
+    QElapsedTimer m_lastH264InputArrival;
 };
 
 #endif  // ANDROIDAUTOFACADE_H

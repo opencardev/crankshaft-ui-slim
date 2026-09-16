@@ -24,6 +24,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QSet>
 #include <QString>
 #include <QTimer>
@@ -73,6 +74,7 @@ signals:
     void videoStateChanged(bool active);
     void projectionReadyChanged(bool ready);
     void videoFrameReceived(const QString& frameUrl, int width, int height);
+    void videoH264FrameReceived(const QByteArray& frameData, int width, int height);
     void videoTransportModeChanged(const QString& mode);
     void webRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void connectionError(const QString& error);
@@ -109,6 +111,11 @@ private:
     int m_reconnectAttempt = 0;
     qint64 m_lastReconnectLogMs = 0;
     bool m_hasLoggedFirstVideoFrame = false;
+    quint64 m_h264EventCount = 0;
+    quint64 m_h264EmitCount = 0;
+    QElapsedTimer m_lastH264EventArrival;
+    QElapsedTimer m_lastH264Emit;
+    quint64 m_touchEventSendCount = 0;
     bool m_projectionReady = false;
     bool m_videoReady = false;
     bool m_audioReady = false;
