@@ -61,6 +61,7 @@ auto H264VideoDecoder::initialise() -> bool {
              {"decoder", m_decodebin != nullptr},
              {"videoconvert", m_videoconvert != nullptr},
              {"appsink", m_appsink != nullptr}});
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("Required GStreamer H.264 elements are unavailable"));
         shutdown();
         return false;
@@ -101,6 +102,7 @@ auto H264VideoDecoder::initialise() -> bool {
     if (!gst_element_link_many(m_appsrc, m_h264parse, m_decodebin, m_videoconvert,
                                m_appsink, nullptr)) {
         Logger::instance().errorContext("H264VideoDecoder", "Failed to link GStreamer H.264 pipeline");
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("Failed to link GStreamer H.264 pipeline"));
         shutdown();
         return false;
@@ -130,6 +132,7 @@ auto H264VideoDecoder::initialise() -> bool {
 
     if (gst_element_set_state(m_pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
         Logger::instance().errorContext("H264VideoDecoder", "Failed to set GStreamer pipeline to PLAYING");
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("Failed to start GStreamer H.264 pipeline"));
         shutdown();
         return false;
@@ -153,6 +156,7 @@ auto H264VideoDecoder::pushFrame(const QByteArray& data, int width, int height) 
 
     GstBuffer* buffer = gst_buffer_new_allocate(nullptr, data.size(), nullptr);
     if (!buffer) {
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("Failed to allocate H.264 buffer"));
         return;
     }
@@ -160,6 +164,7 @@ auto H264VideoDecoder::pushFrame(const QByteArray& data, int width, int height) 
     GstMapInfo map{};
     if (!gst_buffer_map(buffer, &map, GST_MAP_WRITE)) {
         gst_buffer_unref(buffer);
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("Failed to map H.264 buffer"));
         return;
     }
@@ -192,6 +197,7 @@ auto H264VideoDecoder::pushFrame(const QByteArray& data, int width, int height) 
              {"flow", static_cast<int>(result)}});
     }
     if (result != GST_FLOW_OK && result != GST_FLOW_FLUSHING) {
+        // cppcheck-suppress shadowFunction
         emit errorOccurred(QStringLiteral("GStreamer appsrc push failed: %1").arg(result));
     }
 
@@ -448,6 +454,7 @@ auto H264VideoDecoder::handleError(GError* error, const gchar* debug) -> void {
          {"decoded_samples", static_cast<qulonglong>(m_sampleCount)},
          {"bus_errors", static_cast<qulonglong>(m_busErrorCount)},
          {"bus_warnings", static_cast<qulonglong>(m_busWarningCount)}});
+    // cppcheck-suppress shadowFunction
     emit errorOccurred(debug && *debug
                            ? QStringLiteral("%1 (%2)").arg(message, QString::fromUtf8(debug))
                            : message);
