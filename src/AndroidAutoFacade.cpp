@@ -23,6 +23,11 @@
 #include "Logger.h"
 #include "ServiceProvider.h"
 
+#include <memory>
+#include <QVideoSink>
+#include <QVideoFrame>
+#include <QThread>
+
 namespace {
 constexpr int kProjectionFrameIntervalMs = 33;
 }
@@ -38,7 +43,9 @@ AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* 
       m_isProjectionReady(false),
       m_projectionFrameUrl(),
       m_projectionWidth(0),
-      m_projectionHeight(0) {
+      m_projectionHeight(0),
+      m_h264Renderer(std::make_unique<QVideoSinkProjectionVideoRenderer>(this)),
+      m_h264Decoder(std::make_unique<H264VideoDecoder>(this)) {
     if (!m_serviceProvider) {
         Logger::instance().errorContext("AndroidAutoFacade", "ServiceProvider is null");
         return;
@@ -90,6 +97,73 @@ auto AndroidAutoFacade::isWebRtcPreferred() const -> bool {
 
 auto AndroidAutoFacade::hasProjectionFallbackFrame() const -> bool {
     return !m_projectionFrameUrl.isEmpty();
+}
+
+auto AndroidAutoFacade::projectionVideoSink() const -> QObject* {
+    return m_h264Renderer ? m_h264Renderer->surfaceObject() : nullptr;
+}
+
+void AndroidAutoFacade::setProjectionVideoSink(QObject* sink) {
+    auto* videoSink = qobject_cast<QVideoSink*>(sink);
+
+    Logger::instance().infoContext(
+        "AndroidAutoFacade",
+        QString("setProjectionVideoSink: qml_sink=%1 valid=%2 thread=%3")
+            .arg(reinterpret_cast<quintptr>(videoSink), 0, 16)
+            .arg(videoSink != nullptr)
+            .arg(reinterpret_cast<quintptr>(QThread::currentThread()), 0, 16));
+
+    if (m_h264Renderer && videoSink) {
+        m_h264Renderer->setVideoSink(videoSink);
+
+        Logger::instance().infoContext(
+            "AndroidAutoFacade",
+            QString("Bound H.264 decoder to QML video sink: renderer_sink=%1")
+                .arg(reinterpret_cast<quintptr>(m_h264Renderer->surfaceObject()), 0, 16));
+
+        m_loggedQmlSinkFrameCount = 0;
+        QObject::connect(
+            videoSink,
+            &QVideoSink::videoFrameChanged,
+            this,
+            [this](const QVideoFrame& frame) {
+                ++m_loggedQmlSinkFrameCount;
+                if (m_loggedQmlSinkFrameCount == 1 ||
+                    (m_loggedQmlSinkFrameCount % 30) == 0) {
+                    Logger::instance().infoContext(
+                        "AndroidAutoFacade",
+                        QString("QML QVideoSink videoFrameChanged: count=%1 valid=%2 size=%3x%4 pixelFormat=%5")
+                            .arg(m_loggedQmlSinkFrameCount)
+                            .arg(frame.isValid())
+                            .arg(frame.width())
+                            .arg(frame.height())
+                            .arg(static_cast<int>(frame.pixelFormat())));
+                }
+            });
+
+        Logger::instance().infoContext(
+            "AndroidAutoFacade",
+            "Connected QML QVideoSink::videoFrameChanged diagnostic");
+    } else {
+        Logger::instance().errorContext(
+            "AndroidAutoFacade",
+            QString("Failed to bind H.264 decoder to QML video sink: sink=%1 qvideosink=%2 renderer=%3")
+                .arg(reinterpret_cast<quintptr>(sink), 0, 16)
+                .arg(reinterpret_cast<quintptr>(videoSink), 0, 16)
+                .arg(reinterpret_cast<quintptr>(m_h264Renderer.get()), 0, 16));
+    }
+}
+
+void AndroidAutoFacade::logProjectionVideoSinkState() {
+    auto* sink = m_h264Renderer ? m_h264Renderer->surfaceObject() : nullptr;
+    auto* videoSink = qobject_cast<QVideoSink*>(sink);
+
+    Logger::instance().infoContext(
+        "AndroidAutoFacade",
+        QString("Projection QVideoSink state: renderer_sink=%1 valid=%2 thread=%3")
+            .arg(reinterpret_cast<quintptr>(sink), 0, 16)
+            .arg(videoSink != nullptr)
+            .arg(videoSink ? reinterpret_cast<quintptr>(videoSink->thread()) : 0, 0, 16));
 }
 
 // Q_INVOKABLE methods
@@ -267,6 +341,70 @@ auto AndroidAutoFacade::onCoreVideoStateChanged(bool active) -> void {
     }
 }
 
+auto AndroidAutoFacade::onCoreH264VideoFrameReceived(const QByteArray& frameData, int width, int height)
+    -> void {
+    if (!m_h264Decoder || frameData.isEmpty()) return;
+
+    ++m_h264InputArrivalCount;
+    const qint64 arrivalIntervalMs =
+        m_lastH264InputArrival.isValid() ? m_lastH264InputArrival.elapsed() : -1;
+    m_lastH264InputArrival.restart();
+
+    if (m_h264InputArrivalCount == 1 || (m_h264InputArrivalCount % 30) == 0) {
+        Logger::instance().infoContext(
+            "AndroidAutoFacade", "H.264 facade input cadence",
+            {{"count", m_h264InputArrivalCount},
+             {"interval_ms", arrivalIntervalMs},
+             {"payload_size", frameData.size()},
+             {"width", width},
+             {"height", height},
+             {"facade_thread",
+              QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+    }
+    if (!m_loggedFirstH264Input) {
+        m_loggedFirstH264Input = true;
+        Logger::instance().infoContext(
+            "AndroidAutoFacade", "First H.264 frame received by facade",
+            {{"payload_size", frameData.size()},
+             {"prefix_hex", QString::fromLatin1(frameData.left(16).toHex())}});
+    }
+    if (!m_isVideoActive) {
+        m_isVideoActive = true;
+        emit isVideoActiveChanged(m_isVideoActive);
+    }
+    m_projectionWidth = width;
+    m_projectionHeight = height;
+    emit projectionFrameChanged(m_projectionWidth, m_projectionHeight);
+    m_h264Decoder->pushFrame(frameData, width, height);
+
+    if (m_h264InputArrivalCount == 1 || (m_h264InputArrivalCount % 30) == 0) {
+        Logger::instance().infoContext(
+            "AndroidAutoFacade", "H.264 facade pushFrame completed",
+            {{"count", m_h264InputArrivalCount},
+             {"facade_thread",
+              QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+    }
+}
+
+auto AndroidAutoFacade::onDecodedH264Frame(const QImage& image, int width, int height) -> void {
+    if (!m_h264Renderer) return;
+    if (!m_loggedFirstDecodedH264Frame) {
+        m_loggedFirstDecodedH264Frame = true;
+        Logger::instance().infoContext("AndroidAutoFacade", "First H.264 frame decoded");
+    }
+    m_h264Renderer->presentImage(image);
+
+    // Keep projectionWidth/projectionHeight in the Android Auto stream
+    // coordinate space established by the encoded-frame event.  The decoder
+    // may scale the rendered image to the UI display size (e.g. 800x480),
+    // but that rendered size is not the coordinate space advertised to AA.
+    // Overwriting the negotiated stream dimensions here caused touch input
+    // to be generated in 800x480 coordinates while the core advertised
+    // 1280x720.
+    Q_UNUSED(width);
+    Q_UNUSED(height);
+}
+
 auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int width, int height)
     -> void {
     if (!frameUrl.isEmpty() && m_videoInactiveDebounceTimer.isActive()) {
@@ -440,6 +578,15 @@ auto AndroidAutoFacade::setupEventBusConnections() -> void {
             &AndroidAutoFacade::onCoreVideoStateChanged);
         connect(coreClient, &CoreClient::videoFrameReceived, this,
             &AndroidAutoFacade::onCoreVideoFrameReceived);
+        connect(coreClient, &CoreClient::videoH264FrameReceived, this,
+            &AndroidAutoFacade::onCoreH264VideoFrameReceived);
+        connect(m_h264Decoder.get(), &H264VideoDecoder::frameReady, this,
+            &AndroidAutoFacade::onDecodedH264Frame);
+        connect(m_h264Decoder.get(), &H264VideoDecoder::errorOccurred, this,
+            [](const QString& error) {
+                Logger::instance().errorContext("AndroidAutoFacade",
+                                                QString("H.264 decoder error: %1").arg(error));
+            });
         connect(coreClient, &CoreClient::videoTransportModeChanged, this,
             &AndroidAutoFacade::onCoreVideoTransportModeChanged);
         connect(coreClient, &CoreClient::webRtcSignalingReceived, this,

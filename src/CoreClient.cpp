@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QUrl>
 #include <QTimer>
+#include <QThread>
 
 #include "Logger.h"
 
@@ -392,24 +393,54 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
     }
 
     if (points.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: empty point list");
         return;
     }
 
     const QVariantMap firstPoint = points.first().toMap();
     if (firstPoint.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: first point is empty");
         return;
     }
 
+    const double x = firstPoint.value("x").toDouble();
+    const double y = firstPoint.value("y").toDouble();
+    const int pointerId = firstPoint.value("id", 0).toInt();
+    const double pressure = firstPoint.value("pressure", 1.0).toDouble();
+
     QJsonObject touchPayload;
-    touchPayload["x"] = firstPoint.value("x").toDouble();
-    touchPayload["y"] = firstPoint.value("y").toDouble();
+    touchPayload["x"] = x;
+    touchPayload["y"] = y;
     touchPayload["action"] = eventType;
 
     QJsonObject touchMessage;
     touchMessage["type"] = "publish";
     touchMessage["topic"] = "android-auto/touch";
     touchMessage["payload"] = touchPayload;
-    m_webSocket->sendTextMessage(QJsonDocument(touchMessage).toJson(QJsonDocument::Compact));
+
+    const QByteArray wireMessage =
+        QJsonDocument(touchMessage).toJson(QJsonDocument::Compact);
+
+    ++m_touchEventSendCount;
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
+                "points=%7 bytes=%8 socketState=%9")
+            .arg(m_touchEventSendCount)
+            .arg(eventType)
+            .arg(x, 0, 'f', 2)
+            .arg(y, 0, 'f', 2)
+            .arg(pointerId)
+            .arg(pressure, 0, 'f', 2)
+            .arg(points.size())
+            .arg(wireMessage.size())
+            .arg(static_cast<int>(m_webSocket->state())));
+
+    m_webSocket->sendTextMessage(QString::fromUtf8(wireMessage));
+
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send queued #%1").arg(m_touchEventSendCount));
 }
 
 auto CoreClient::sendKeyEvent(const QString& keyName, const QString& action, int keyCode) -> void {
@@ -631,6 +662,22 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
         QString topic = obj.value("topic").toString();
         QJsonObject payload = obj.value("payload").toObject();
 
+        if (topic == "android-auto/media/video-frame") {
+            ++m_h264EventCount;
+            const qint64 eventIntervalMs =
+                m_lastH264EventArrival.isValid() ? m_lastH264EventArrival.elapsed() : -1;
+            m_lastH264EventArrival.restart();
+
+            if (m_h264EventCount == 1 || (m_h264EventCount % 30) == 0) {
+                Logger::instance().infoContext(
+                    "CoreClient", "H.264 media event arrival cadence",
+                    {{"count", m_h264EventCount},
+                     {"interval_ms", eventIntervalMs},
+                     {"core_thread",
+                      QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+            }
+        }
+
         Logger::instance().debugContext("CoreClient", QString("Received event: %1").arg(topic));
 
         if (topic == "android-auto/status/state-changed") {
@@ -820,7 +867,44 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const int width = payload.value("width").toInt();
             const int height = payload.value("height").toInt();
 
-            if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
+            if (!encodedData.isEmpty() && encoding == "h264-base64") {
+                QElapsedTimer h264Base64Timer;
+                h264Base64Timer.start();
+                const QByteArray frameData = QByteArray::fromBase64(encodedData.toLatin1());
+                const qint64 h264Base64ElapsedMs = h264Base64Timer.elapsed();
+                if (!frameData.isEmpty()) {
+                    ++m_h264EmitCount;
+                    const qint64 emitIntervalMs =
+                        m_lastH264Emit.isValid() ? m_lastH264Emit.elapsed() : -1;
+                    m_lastH264Emit.restart();
+
+                    if (m_h264EmitCount == 1 || (m_h264EmitCount % 30) == 0) {
+                        Logger::instance().infoContext(
+                            "CoreClient", "H.264 frame emission cadence",
+                            {{"count", m_h264EmitCount},
+                             {"emit_interval_ms", emitIntervalMs},
+                             {"base64_decode_ms", h264Base64ElapsedMs},
+                             {"encoded_size", encodedData.size()},
+                             {"decoded_size", frameData.size()},
+                             {"core_thread",
+                              QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+                    }
+                    if (!m_hasLoggedFirstVideoFrame) {
+                        m_hasLoggedFirstVideoFrame = true;
+                        Logger::instance().infoContext(
+                            "CoreClient", "First android-auto/media/video-frame event received",
+                            {{"encoding", encoding},
+                             {"width", width},
+                             {"height", height},
+                             {"payload_size", encodedData.size()}});
+                    }
+                    emit videoH264FrameReceived(frameData, width, height);
+                    if (!m_videoReady) {
+                        m_videoReady = true;
+                        emit videoStateChanged(true);
+                    }
+                }
+            } else if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
                 if (!m_hasLoggedFirstVideoFrame) {
                     m_hasLoggedFirstVideoFrame = true;
                     Logger::instance().infoContext(

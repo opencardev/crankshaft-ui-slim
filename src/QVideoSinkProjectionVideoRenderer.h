@@ -20,6 +20,7 @@
 #pragma once
 
 #include <QVideoSink>
+#include <QElapsedTimer>
 
 #include "ProjectionVideoRenderer.h"
 
@@ -29,9 +30,16 @@ public:
     ~QVideoSinkProjectionVideoRenderer() override = default;
 
     [[nodiscard]] auto surfaceObject() const -> QObject* override;
+    auto setVideoSink(QVideoSink* videoSink) -> void;
     auto presentImage(const QImage& image) -> void override;
     auto clear() -> void override;
 
 private:
     QVideoSink* m_videoSink{nullptr};
+
+    // Diagnostics only: measure producer rate, queued delivery rate, and
+    // queued-call latency without changing the rendering behaviour.
+    QElapsedTimer m_diagnosticTimer;
+    quint64 m_presentCount{0};
+    quint64 m_queuedDeliveryCount{0};
 };
