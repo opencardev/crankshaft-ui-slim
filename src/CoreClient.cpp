@@ -393,24 +393,54 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
     }
 
     if (points.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: empty point list");
         return;
     }
 
     const QVariantMap firstPoint = points.first().toMap();
     if (firstPoint.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: first point is empty");
         return;
     }
 
+    const double x = firstPoint.value("x").toDouble();
+    const double y = firstPoint.value("y").toDouble();
+    const int pointerId = firstPoint.value("id", 0).toInt();
+    const double pressure = firstPoint.value("pressure", 1.0).toDouble();
+
     QJsonObject touchPayload;
-    touchPayload["x"] = firstPoint.value("x").toDouble();
-    touchPayload["y"] = firstPoint.value("y").toDouble();
+    touchPayload["x"] = x;
+    touchPayload["y"] = y;
     touchPayload["action"] = eventType;
 
     QJsonObject touchMessage;
     touchMessage["type"] = "publish";
     touchMessage["topic"] = "android-auto/touch";
     touchMessage["payload"] = touchPayload;
-    m_webSocket->sendTextMessage(QJsonDocument(touchMessage).toJson(QJsonDocument::Compact));
+
+    const QByteArray wireMessage =
+        QJsonDocument(touchMessage).toJson(QJsonDocument::Compact);
+
+    ++m_touchEventSendCount;
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
+                "points=%7 bytes=%8 socketState=%9")
+            .arg(m_touchEventSendCount)
+            .arg(eventType)
+            .arg(x, 0, 'f', 2)
+            .arg(y, 0, 'f', 2)
+            .arg(pointerId)
+            .arg(pressure, 0, 'f', 2)
+            .arg(points.size())
+            .arg(wireMessage.size())
+            .arg(static_cast<int>(m_webSocket->state())));
+
+    m_webSocket->sendTextMessage(QString::fromUtf8(wireMessage));
+
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send queued #%1").arg(m_touchEventSendCount));
 }
 
 auto CoreClient::sendKeyEvent(const QString& keyName, const QString& action, int keyCode) -> void {

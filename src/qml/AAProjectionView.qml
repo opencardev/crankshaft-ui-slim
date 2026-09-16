@@ -74,13 +74,6 @@ Item {
             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height)
         touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
-        var aaWidth = androidAutoFacade && androidAutoFacade.projectionWidth > 0
-            ? androidAutoFacade.projectionWidth
-            : mappedWidth
-        var aaHeight = androidAutoFacade && androidAutoFacade.projectionHeight > 0
-            ? androidAutoFacade.projectionHeight
-            : mappedHeight
-        touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
     }
 
     // updateTouchForwarderDisplaySize() is called from onPaintedWidthChanged /

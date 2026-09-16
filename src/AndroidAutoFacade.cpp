@@ -393,11 +393,16 @@ auto AndroidAutoFacade::onDecodedH264Frame(const QImage& image, int width, int h
         Logger::instance().infoContext("AndroidAutoFacade", "First H.264 frame decoded");
     }
     m_h264Renderer->presentImage(image);
-    if (m_projectionWidth != width || m_projectionHeight != height) {
-        m_projectionWidth = width;
-        m_projectionHeight = height;
-        emit projectionFrameChanged(width, height);
-    }
+
+    // Keep projectionWidth/projectionHeight in the Android Auto stream
+    // coordinate space established by the encoded-frame event.  The decoder
+    // may scale the rendered image to the UI display size (e.g. 800x480),
+    // but that rendered size is not the coordinate space advertised to AA.
+    // Overwriting the negotiated stream dimensions here caused touch input
+    // to be generated in 800x480 coordinates while the core advertised
+    // 1280x720.
+    Q_UNUSED(width);
+    Q_UNUSED(height);
 }
 
 auto AndroidAutoFacade::onCoreVideoFrameReceived(const QString& frameUrl, int width, int height)

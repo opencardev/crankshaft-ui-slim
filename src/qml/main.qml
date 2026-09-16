@@ -528,13 +528,6 @@ ApplicationWindow {
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
                         _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
-                        var aaWidth = _androidAutoFacade && _androidAutoFacade.projectionWidth > 0
-                            ? _androidAutoFacade.projectionWidth
-                            : mappedWidth
-                        var aaHeight = _androidAutoFacade && _androidAutoFacade.projectionHeight > 0
-                            ? _androidAutoFacade.projectionHeight
-                            : mappedHeight
-                        _touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
                     }
 
                     function mapToProjectionCoordinates(rawX, rawY) {

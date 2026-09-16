@@ -115,6 +115,7 @@ private:
     quint64 m_h264EmitCount = 0;
     QElapsedTimer m_lastH264EventArrival;
     QElapsedTimer m_lastH264Emit;
+    quint64 m_touchEventSendCount = 0;
     bool m_projectionReady = false;
     bool m_videoReady = false;
     bool m_audioReady = false;
