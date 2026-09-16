@@ -286,12 +286,12 @@ auto H264VideoDecoder::onPadProbe(GstPad* pad, GstPadProbeInfo* info, gpointer u
                 previous >= 0 ? (nowNs - previous) / 1000000 : -1;
             self->m_stageLastNs.insert(stage, nowNs);
 
-            const quint64 count = ++self->m_stageCounts[stage];
-            if (count == 1 || (count % 30) == 0) {
+            const quint64 stageCount = ++self->m_stageCounts[stage];
+            if (stageCount == 1 || (stageCount % 30) == 0) {
                 Logger::instance().infoContext(
                     "H264VideoDecoder", "GStreamer stage cadence",
                     {{"stage", stage},
-                     {"count", static_cast<qulonglong>(count)},
+                     {"count", static_cast<qulonglong>(stageCount)},
                      {"interval_ms", intervalMs},
                      {"bytes", static_cast<qulonglong>(
                                    buffer ? gst_buffer_get_size(buffer) : 0)}});
