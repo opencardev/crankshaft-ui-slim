@@ -735,9 +735,13 @@ ApplicationWindow {
                         smooth: true
                         cache: false
                         source: _androidAutoFacade ? _androidAutoFacade.projectionFrameUrl : ""
-                        // Keep the frame swap synchronous so the inline projection
-                        // surface does not flash between successive video frames.
-                        asynchronous: false
+                        // Decode incoming JPEG fallback frames off the QML GUI thread
+                        // and retain the last completed frame while the next frame
+                        // is loading.  On low-power hardware (notably RPi3),
+                        // synchronous base64/JPEG decoding can block the render loop
+                        // and make the projection visibly flicker between frames.
+                        asynchronous: true
+                        retainWhileLoading: true
                         visible: !projectionSurface.webRtcActive && !projectionSurface.h264Selected && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
