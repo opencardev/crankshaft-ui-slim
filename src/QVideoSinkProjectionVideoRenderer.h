@@ -1,0 +1,45 @@
+/*
+ * Project: Crankshaft
+ * This file is part of Crankshaft project.
+ * Copyright (C) 2025 OpenCarDev Team
+ *
+ *  Crankshaft is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  Crankshaft is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with Crankshaft. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include <QVideoSink>
+#include <QElapsedTimer>
+
+#include "ProjectionVideoRenderer.h"
+
+class QVideoSinkProjectionVideoRenderer : public ProjectionVideoRenderer {
+public:
+    explicit QVideoSinkProjectionVideoRenderer(QObject* parent = nullptr);
+    ~QVideoSinkProjectionVideoRenderer() override = default;
+
+    [[nodiscard]] auto surfaceObject() const -> QObject* override;
+    auto setVideoSink(QVideoSink* videoSink) -> void;
+    auto presentImage(const QImage& image) -> void override;
+    auto clear() -> void override;
+
+private:
+    QVideoSink* m_videoSink{nullptr};
+
+    // Diagnostics only: measure producer rate, queued delivery rate, and
+    // queued-call latency without changing the rendering behaviour.
+    QElapsedTimer m_diagnosticTimer;
+    quint64 m_presentCount{0};
+    quint64 m_queuedDeliveryCount{0};
+};

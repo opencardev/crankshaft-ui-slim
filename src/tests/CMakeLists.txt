@@ -26,6 +26,11 @@ set(SLIM_UI_TEST_COMMON_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../PreferencesService.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../ServiceProvider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoFacade.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../H264VideoDecoder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoWebRtcSession.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ProjectionVideoRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../QVideoSinkProjectionVideoRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AndroidAutoWebRtcReceiver.cpp
 )
 
 function(add_slim_ui_test test_name)
@@ -48,12 +53,26 @@ function(add_slim_ui_test test_name)
         Qt6::Multimedia
         Qt6::Sql
         Qt6::WebSockets
+        ${GSTREAMER_LIBRARIES}
+        ${GSTREAMER_APP_LIBRARIES}
+        ${GSTREAMER_VIDEO_LIBRARIES}
+        ${GSTREAMER_WEBRTC_LIBRARIES}
+        ${GSTREAMER_SDP_LIBRARIES}
     )
 
     target_include_directories(${test_name} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${GSTREAMER_INCLUDE_DIRS}
+        ${GSTREAMER_APP_INCLUDE_DIRS}
+        ${GSTREAMER_VIDEO_INCLUDE_DIRS}
+        ${GSTREAMER_WEBRTC_INCLUDE_DIRS}
+        ${GSTREAMER_SDP_INCLUDE_DIRS}
     )
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${test_name} PRIVATE -Wno-psabi)
+    endif()
 
     add_test(
         NAME ${test_name}

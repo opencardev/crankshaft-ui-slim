@@ -23,7 +23,9 @@
 #include "CoreClient.h"
 #include "Logger.h"
 #include "ServiceProvider.h"
+#include <QGuiApplication>
 #include <QJsonObject>
+#include <QScreen>
 
 TouchEventForwarder::TouchEventForwarder(AndroidAutoFacade* androidAutoFacade,
                                          ServiceProvider* serviceProvider, QObject* parent)
@@ -46,6 +48,27 @@ TouchEventForwarder::TouchEventForwarder(AndroidAutoFacade* androidAutoFacade,
         return;
     }
 
+    // The projection surface can call setDisplaySize() before CoreClient has
+    // connected.  In that case the display-resolution publish is dropped.
+    // Re-publish the current resolution when the WebSocket connection becomes
+    // available so the core's touch-coordinate bounds match the UI.
+    if (auto* coreClient = m_serviceProvider->androidAutoService()) {
+        connect(coreClient, &CoreClient::connectionStateChanged, this,
+                [this](int state) {
+                    if (state != static_cast<int>(CoreClient::ConnectionState::Connected)) {
+                        return;
+                    }
+
+                    // Allow the current resolution to be published again.
+                    m_lastPublishedResolution = QSize();
+                    setDisplaySize(m_displaySize);
+
+                    Logger::instance().infoContext(
+                        "TouchEventForwarder",
+                        "Core connected; re-published current display resolution for touch input");
+                });
+    }
+
     Logger::instance().infoContext("TouchEventForwarder",
                                    QString("Initialized with display: %1x%2, AA: %3x%4")
                                        .arg(m_displaySize.width())
@@ -61,30 +84,67 @@ TouchEventForwarder::~TouchEventForwarder() {
 // Property getters/setters
 QSize TouchEventForwarder::displaySize() const { return m_displaySize; }
 
+QSize TouchEventForwarder::resolvePublishedDisplayResolution(const QSize& renderedSize,
+                                                              const QSize& screenSize,
+                                                              qreal devicePixelRatio) {
+    if (screenSize.isValid() && screenSize.width() > 0 && screenSize.height() > 0) {
+        const qreal ratio = qMax<qreal>(1.0, devicePixelRatio);
+        return QSize(qRound(screenSize.width() * ratio), qRound(screenSize.height() * ratio));
+    }
+
+    return renderedSize;
+}
+
 auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
-    if (m_displaySize != size) {
+    const bool sizeActuallyChanged = (m_displaySize != size);
+
+    if (sizeActuallyChanged) {
         m_displaySize = size;
         emit displaySizeChanged(size);
 
         Logger::instance().infoContext(
             "TouchEventForwarder",
             QString("Display size changed to: %1x%2").arg(size.width()).arg(size.height()));
+    }
 
-        // Notify the headless core server of the new display resolution
-        // so it can configure GStreamer's videoscale to match this resolution,
-        // preventing HDMI flickering caused by resolution mismatches.
-        auto* coreClient = m_serviceProvider ? m_serviceProvider->androidAutoService() : nullptr;
-        if (coreClient) {
-            QJsonObject payload;
-            payload[QStringLiteral("width")] = size.width();
-            payload[QStringLiteral("height")] = size.height();
-            
-            Logger::instance().infoContext(
-                "TouchEventForwarder",
-                QString("Publishing display resolution to core: %1x%2")
-                    .arg(size.width()).arg(size.height()));
-            coreClient->publish(QStringLiteral("android-auto/display/resolution"), payload);
-        }
+    QSize screenSize;
+    qreal devicePixelRatio = 1.0;
+    if (const QScreen* screen = QGuiApplication::primaryScreen()) {
+        screenSize = screen->geometry().size();
+        devicePixelRatio = screen->devicePixelRatio();
+    }
+
+    const QSize publishedDisplayResolution =
+        resolvePublishedDisplayResolution(size, screenSize, devicePixelRatio);
+
+    // Android Auto touch coordinates use the published display resolution.
+    // Keep this separate from the rendered H.264 frame size.
+    setAndroidAutoSize(publishedDisplayResolution);
+
+    // Only publish the display resolution to the core service when it has
+    // actually changed.  Without this guard the QML onProjectionFrameChanged
+    // signal fires on every decoded video frame (~30 fps), causing the core
+    // to receive dozens of identical setDisplayResolution() calls per second.
+    // Each call logs and re-notifies the GStreamer video decoder, triggering
+    // pipeline reconfiguration events that cause visible HDMI flicker.
+    if (publishedDisplayResolution == m_lastPublishedResolution && m_lastPublishedResolution.isValid()) {
+        return;
+    }
+
+    m_lastPublishedResolution = publishedDisplayResolution;
+
+    auto* coreClient = m_serviceProvider ? m_serviceProvider->androidAutoService() : nullptr;
+    if (coreClient) {
+        QJsonObject payload;
+        payload[QStringLiteral("width")] = publishedDisplayResolution.width();
+        payload[QStringLiteral("height")] = publishedDisplayResolution.height();
+
+        Logger::instance().infoContext(
+            "TouchEventForwarder",
+            QString("Publishing display resolution to core: %1x%2")
+                .arg(publishedDisplayResolution.width())
+                .arg(publishedDisplayResolution.height()));
+        coreClient->publish(QStringLiteral("android-auto/display/resolution"), payload);
     }
 }
 
@@ -239,16 +299,39 @@ void TouchEventForwarder::sendToAndroidAuto(const QString& eventType,
 
     // Convert to QVariantList for transmission
     QVariantList pointList;
+    QString pointSummary;
     for (const TouchPoint& point : points) {
         pointList.append(point.toVariantMap());
+        if (!pointSummary.isEmpty()) {
+            pointSummary += QStringLiteral("; ");
+        }
+        pointSummary += QStringLiteral("id=%1 raw=(%2,%3) scaled=(%4,%5) pressure=%6")
+                            .arg(point.id)
+                            .arg(point.position.x(), 0, 'f', 2)
+                            .arg(point.position.y(), 0, 'f', 2)
+                            .arg(point.scaledPosition.x(), 0, 'f', 2)
+                            .arg(point.scaledPosition.y(), 0, 'f', 2)
+                            .arg(point.pressure, 0, 'f', 2);
     }
+
+    Logger::instance().infoContext(
+        "TouchEventForwarder",
+        QString("AA touch forwarding: event=%1 display=%2x%3 aaSize=%4x%5 points=%6 [%7]")
+            .arg(eventType)
+            .arg(m_displaySize.width())
+            .arg(m_displaySize.height())
+            .arg(m_androidAutoSize.width())
+            .arg(m_androidAutoSize.height())
+            .arg(points.size())
+            .arg(pointSummary));
 
     aaService->sendTouchEvent(eventType, pointList);
 
-    Logger::instance().debugContext("TouchEventForwarder",
-                                    QString("Sent %1 event with %2 points to AndroidAutoService")
-                                        .arg(eventType)
-                                        .arg(points.size()));
+    Logger::instance().infoContext(
+        "TouchEventForwarder",
+        QString("AA touch handed to AndroidAutoService: event=%1 points=%2")
+            .arg(eventType)
+            .arg(points.size()));
 }
 
 bool TouchEventForwarder::shouldForwardMoveEvent(const QString& eventType,
@@ -316,17 +399,28 @@ auto TouchEventForwarder::scaleCoordinates(const QPointF& point) const -> QPoint
         return point;
     }
 
-    // Calculate scaling factors
-    qreal scaleX = static_cast<qreal>(m_androidAutoSize.width()) / m_displaySize.width();
-    qreal scaleY = static_cast<qreal>(m_androidAutoSize.height()) / m_displaySize.height();
+    // TouchEventForwarder owns the authoritative Android Auto coordinate space.
+    // setDisplaySize() keeps m_androidAutoSize synchronized with the published
+    // physical display resolution. The decoded H.264 image may be rendered at
+    // a different size (for example 800x480), so never use the frame size here.
+    const QSize touchResolution = m_androidAutoSize;
+    if (!touchResolution.isValid() || touchResolution.width() <= 0 ||
+        touchResolution.height() <= 0) {
+        Logger::instance().warningContext(
+            "TouchEventForwarder", "Invalid published display resolution for touch scaling");
+        return point;
+    }
+
+    const qreal scaleX = static_cast<qreal>(touchResolution.width()) / m_displaySize.width();
+    const qreal scaleY = static_cast<qreal>(touchResolution.height()) / m_displaySize.height();
 
     // Scale coordinates
     qreal scaledX = point.x() * scaleX;
     qreal scaledY = point.y() * scaleY;
 
     // Clamp to AndroidAuto bounds
-    scaledX = qBound(0.0, scaledX, static_cast<qreal>(m_androidAutoSize.width() - 1));
-    scaledY = qBound(0.0, scaledY, static_cast<qreal>(m_androidAutoSize.height() - 1));
+    scaledX = qBound(0.0, scaledX, static_cast<qreal>(touchResolution.width() - 1));
+    scaledY = qBound(0.0, scaledY, static_cast<qreal>(touchResolution.height() - 1));
 
     return QPointF(scaledX, scaledY);
 }

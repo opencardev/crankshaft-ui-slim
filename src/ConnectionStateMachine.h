@@ -84,11 +84,14 @@ private slots:
     void onFacadeConnectionEstablished(const QString& deviceName);
     void onRetryTimerTimeout();
     void onConnectionTimeout();
+    void onConnectedDropGraceTimeout();
 
 private:
     auto transitionToState(State newState) -> void;
     auto startRetryTimer() -> void;
     auto stopRetryTimer() -> void;
+    auto startConnectedDropGrace() -> void;
+    auto cancelConnectedDropGrace() -> void;
     auto calculateRetryDelay() const -> int;
     auto isValidTransition(State from, State to) const -> bool;
     auto logTransition(State from, State to) -> void;
@@ -102,13 +105,18 @@ private:
 
     QTimer* m_retryTimer;
     QTimer* m_connectionTimeout;
+    QTimer* m_connectedDropGraceTimer;
     QDateTime m_connectionTimeoutDeadline;
+    QDateTime m_connectedDropGraceDeadline;
+    bool m_connectedDropGracePending;
+    bool m_intentionalStopInProgress;
 
     // Retry configuration
     static constexpr int INITIAL_RETRY_DELAY_MS = 1000;  // 1 second
     static constexpr int MAX_RETRY_DELAY_MS = 30000;     // 30 seconds
     static constexpr int MAX_RETRY_COUNT = 10;
     static constexpr int CONNECTION_TIMEOUT_MS = 15000;  // 15 seconds
+    static constexpr int CONNECTED_DROP_GRACE_MS = 700;  // 0.7 second
 };
 
 #endif  // CONNECTIONSTATEMACHINE_H

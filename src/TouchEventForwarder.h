@@ -63,6 +63,10 @@ public:
                                  ServiceProvider* serviceProvider, QObject* parent = nullptr);
     ~TouchEventForwarder() override;
 
+    static QSize resolvePublishedDisplayResolution(const QSize& renderedSize,
+                                                   const QSize& screenSize = QSize(),
+                                                   qreal devicePixelRatio = 1.0);
+
     // Property getters/setters
     [[nodiscard]] auto displaySize() const -> QSize;
     auto setDisplaySize(const QSize& size) -> void;
@@ -105,6 +109,12 @@ private:
     ServiceProvider* m_serviceProvider;
     QSize m_displaySize;
     QSize m_androidAutoSize;
+    // Tracks the last resolution published to crankshaft-core so we can skip
+    // redundant WebSocket messages.  onProjectionFrameChanged fires on every
+    // decoded video frame (~30 fps); without this guard the core receives
+    // hundreds of identical setDisplayResolution() calls per second, each
+    // triggering a GStreamer pipeline notification that causes HDMI flicker.
+    QSize m_lastPublishedResolution;
     bool m_isEnabled;
 
     // Latency tracking

@@ -18,6 +18,7 @@
 */
 
 import QtQuick
+import QtMultimedia
 
 Item {
     id: projectionView
@@ -44,6 +45,12 @@ Item {
     
     // TouchEventForwarder reference (set by parent or use global _touchForwarder)
     property var touchForwarder: _touchForwarder
+    property var androidAutoWebRtcReceiver: _androidAutoWebRtcReceiver
+    readonly property bool webRtcSelected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
+    readonly property bool h264Selected: androidAutoFacade && androidAutoFacade.videoTransportMode && androidAutoFacade.videoTransportMode.toLowerCase() === "websocket-h264"
+    readonly property bool webRtcHealthy: androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.active && androidAutoWebRtcReceiver.healthy
+    readonly property bool webRtcFallbackActive: webRtcSelected && androidAutoWebRtcReceiver && androidAutoWebRtcReceiver.fallbackRecommended
+    readonly property bool webRtcActive: webRtcSelected && webRtcHealthy
     
     // Update touch forwarder display size when view size changes
     onWidthChanged: {
@@ -59,36 +66,42 @@ Item {
             return
         }
 
-        var mappedWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : width
-        var mappedHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height
+        var mappedWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
+            ? projectionVideoOutput.contentRect.width
+            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : width)
+        var mappedHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
+            ? projectionVideoOutput.contentRect.height
+            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : height)
         touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
-        var aaWidth = androidAutoFacade && androidAutoFacade.projectionWidth > 0
-            ? androidAutoFacade.projectionWidth
-            : mappedWidth
-        var aaHeight = androidAutoFacade && androidAutoFacade.projectionHeight > 0
-            ? androidAutoFacade.projectionHeight
-            : mappedHeight
-        touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
     }
 
-    Connections {
-        target: androidAutoFacade
-        function onProjectionFrameChanged() {
-            projectionView.updateTouchForwarderDisplaySize()
-        }
-    }
+    // updateTouchForwarderDisplaySize() is called from onPaintedWidthChanged /
+    // onPaintedHeightChanged on the projectionImage (below) which fire whenever
+    // the rendered frame size changes.  We deliberately do NOT hook
+    // onProjectionFrameChanged here: that signal fires on every decoded video
+    // frame (~30 fps) and would trigger a WebSocket publish to crankshaft-core
+    // at frame rate, causing GStreamer pipeline reconfiguration events that
+    // produce visible HDMI flicker.
 
     function mapToProjectionCoordinates(rawX, rawY) {
-        var frameWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width
-        var frameHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height
+        var frameWidth = webRtcActive && projectionVideoOutput.contentRect.width > 0
+            ? projectionVideoOutput.contentRect.width
+            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
+        var frameHeight = webRtcActive && projectionVideoOutput.contentRect.height > 0
+            ? projectionVideoOutput.contentRect.height
+            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
 
         if (frameWidth <= 0 || frameHeight <= 0) {
             return { x: 0, y: 0 }
         }
 
-        var frameLeft = (projectionImage.width - frameWidth) / 2
-        var frameTop = (projectionImage.height - frameHeight) / 2
+        var frameLeft = webRtcActive && projectionVideoOutput.contentRect.width > 0
+            ? projectionVideoOutput.contentRect.x
+            : (projectionImage.width - frameWidth) / 2
+        var frameTop = webRtcActive && projectionVideoOutput.contentRect.height > 0
+            ? projectionVideoOutput.contentRect.y
+            : (projectionImage.height - frameHeight) / 2
 
         var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
         var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
@@ -96,7 +109,19 @@ Item {
         return { x: localX, y: localY }
     }
     
-    // Projection frame output
+    VideoOutput {
+        id: projectionVideoOutput
+        anchors.fill: parent
+        fillMode: VideoOutput.PreserveAspectFit
+        visible: webRtcActive || h264Selected
+        videoSink: webRtcActive
+            ? (androidAutoWebRtcReceiver ? androidAutoWebRtcReceiver.videoSinkObject : null)
+            : (androidAutoFacade ? androidAutoFacade.projectionVideoSink : null)
+
+        onContentRectChanged: projectionView.updateTouchForwarderDisplaySize()
+    }
+
+    // Projection frame output fallback
     Image {
         id: projectionImage
         anchors.fill: parent
@@ -104,7 +129,10 @@ Item {
         source: androidAutoFacade ? androidAutoFacade.projectionFrameUrl : ""
         smooth: true
         cache: false
-        asynchronous: true
+        // Decode each frame synchronously to avoid blanking between rapidly
+        // changing data URLs on the projection surface.
+        asynchronous: false
+        visible: (!webRtcActive && !h264Selected || webRtcFallbackActive) && source !== ""
 
         onPaintedWidthChanged: projectionView.updateTouchForwarderDisplaySize()
         onPaintedHeightChanged: projectionView.updateTouchForwarderDisplaySize()
@@ -113,7 +141,8 @@ Item {
         Rectangle {
             anchors.fill: parent
             color: palette.backgroundColor
-            visible: projectionImage.source === "" || !androidAutoFacade || !androidAutoFacade.isVideoActive
+            visible: (!webRtcActive && (projectionImage.source === "" || !androidAutoFacade || !androidAutoFacade.isVideoActive)) ||
+                     (webRtcActive && projectionVideoOutput.contentRect.width <= 0)
             
             Text {
                 anchors.centerIn: parent

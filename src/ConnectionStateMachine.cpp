@@ -19,6 +19,7 @@
 
 #include "ConnectionStateMachine.h"
 
+#include <QTimer>
 #include <QtMath>
 
 #include "AndroidAutoFacade.h"
@@ -33,8 +34,13 @@ ConnectionStateMachine::ConnectionStateMachine(AndroidAutoFacade* androidAutoFac
       m_nextRetryDelay(INITIAL_RETRY_DELAY_MS),
       m_lastError(),
       m_lastTransitionTime(QDateTime::currentDateTime()),
-      m_retryTimer(new QTimer(this)),
-      m_connectionTimeout(new QTimer(this)) {
+            m_retryTimer(new QTimer(this)),
+            m_connectionTimeout(new QTimer(this)),
+            m_connectedDropGraceTimer(new QTimer(this)),
+            m_connectionTimeoutDeadline(),
+            m_connectedDropGraceDeadline(),
+            m_connectedDropGracePending(false),
+            m_intentionalStopInProgress(false) {
     if (!m_androidAutoFacade) {
         Logger::instance().errorContext("ConnectionStateMachine", "AndroidAutoFacade is null");
         return;
@@ -48,6 +54,12 @@ ConnectionStateMachine::ConnectionStateMachine(AndroidAutoFacade* androidAutoFac
     m_connectionTimeout->setSingleShot(true);
     connect(m_connectionTimeout, &QTimer::timeout, this,
             &ConnectionStateMachine::onConnectionTimeout);
+
+    // Setup connected-drop grace timer
+    m_connectedDropGraceTimer->setSingleShot(true);
+    m_connectedDropGraceTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_connectedDropGraceTimer, &QTimer::timeout, this,
+            &ConnectionStateMachine::onConnectedDropGraceTimeout);
 
     // Connect to facade signals
     connect(m_androidAutoFacade, &AndroidAutoFacade::connectionStateChanged, this,
@@ -63,6 +75,7 @@ ConnectionStateMachine::ConnectionStateMachine(AndroidAutoFacade* androidAutoFac
 ConnectionStateMachine::~ConnectionStateMachine() {
     stopRetryTimer();
     m_connectionTimeout->stop();
+    cancelConnectedDropGrace();
     Logger::instance().infoContext("ConnectionStateMachine", "Shutting down");
 }
 
@@ -91,6 +104,8 @@ auto ConnectionStateMachine::startConnection() -> void {
     }
 
     stopRetryTimer();
+    cancelConnectedDropGrace();
+    m_intentionalStopInProgress = false;
     m_retryCount = 0;
     emit retryCountChanged(m_retryCount);
 
@@ -104,8 +119,10 @@ auto ConnectionStateMachine::startConnection() -> void {
 auto ConnectionStateMachine::stopConnection() -> void {
     Logger::instance().infoContext("ConnectionStateMachine", "Stopping connection");
 
+    m_intentionalStopInProgress = true;
     stopRetryTimer();
     m_connectionTimeout->stop();
+    cancelConnectedDropGrace();
 
     if (m_androidAutoFacade) {
         m_androidAutoFacade->disconnectDevice();
@@ -131,6 +148,8 @@ auto ConnectionStateMachine::handleError(const QString& error) -> void {
     m_lastError = error;
     emit lastErrorChanged(m_lastError);
 
+    cancelConnectedDropGrace();
+
     transitionToState(State::Error);
 
     // Start retry if under max attempts
@@ -150,9 +169,28 @@ auto ConnectionStateMachine::onFacadeConnectionStateChanged(int state) -> void {
 
     State newState = static_cast<State>(state);
 
-    // If core/service drops while previously connected, surface it as an error.
+    if (m_intentionalStopInProgress && newState == State::Disconnected) {
+        Logger::instance().debugContext("ConnectionStateMachine",
+                                        "Ignoring disconnected escalation during intentional stop");
+        cancelConnectedDropGrace();
+        transitionToState(State::Disconnected);
+        return;
+    }
+
+    if (newState == State::Connecting || newState == State::Connected) {
+        const bool wasGracePending = m_connectedDropGracePending;
+        cancelConnectedDropGrace();
+
+        // During provisional-drop recovery keep current state as Connected; avoid
+        // invalid Connected -> Connecting transitions while grace is active.
+        if (wasGracePending && newState == State::Connecting) {
+            return;
+        }
+    }
+
+    // If core/service drops while previously connected, require sustained drop before escalation.
     if (m_currentState == State::Connected && newState == State::Disconnected) {
-        handleError("Lost connection to crankshaft-core service");
+        startConnectedDropGrace();
         return;
     }
 
@@ -160,9 +198,20 @@ auto ConnectionStateMachine::onFacadeConnectionStateChanged(int state) -> void {
 }
 
 auto ConnectionStateMachine::onFacadeConnectionFailed(const QString& reason) -> void {
+    if (m_intentionalStopInProgress) {
+        Logger::instance().debugContext(
+            "ConnectionStateMachine",
+            QString("Ignoring connectionFailed during intentional stop: %1").arg(reason));
+        cancelConnectedDropGrace();
+        transitionToState(State::Disconnected);
+        m_intentionalStopInProgress = false;
+        return;
+    }
+
     Logger::instance().errorContext("ConnectionStateMachine",
                                     QString("Connection failed: %1").arg(reason));
 
+    m_intentionalStopInProgress = false;
     handleError(reason);
 }
 
@@ -172,6 +221,8 @@ auto ConnectionStateMachine::onFacadeConnectionEstablished(const QString& device
 
     stopRetryTimer();
     m_connectionTimeout->stop();
+    cancelConnectedDropGrace();
+    m_intentionalStopInProgress = false;
 
     if (m_retryCount > 0) {
         emit connectionRecovered();
@@ -239,6 +290,45 @@ auto ConnectionStateMachine::onConnectionTimeout() -> void {
     handleError("Connection timed out");
 }
 
+auto ConnectionStateMachine::onConnectedDropGraceTimeout() -> void {
+    if (!m_connectedDropGracePending) {
+        Logger::instance().debugContext("ConnectionStateMachine",
+                                        "Ignoring stale connected-drop grace timeout");
+        return;
+    }
+
+    const QDateTime now = QDateTime::currentDateTime();
+    if (m_connectedDropGraceDeadline.isValid() && now < m_connectedDropGraceDeadline) {
+        const qint64 remainingMs = now.msecsTo(m_connectedDropGraceDeadline);
+        // Re-arm to avoid losing escalation when timer callbacks arrive early.
+        m_connectedDropGraceTimer->start(static_cast<int>(qMax<qint64>(1, remainingMs)));
+        Logger::instance().debugContext(
+            "ConnectionStateMachine",
+            QString("Re-arming early connected-drop timeout (remaining=%1ms, now=%2, deadline=%3)")
+                .arg(remainingMs)
+                .arg(now.toString(Qt::ISODateWithMs))
+                .arg(m_connectedDropGraceDeadline.toString(Qt::ISODateWithMs)));
+        return;
+    }
+
+    m_connectedDropGracePending = false;
+
+    if (!m_androidAutoFacade) {
+        return;
+    }
+
+    const auto facadeState = static_cast<State>(m_androidAutoFacade->connectionState());
+    if (facadeState != State::Disconnected) {
+        Logger::instance().infoContext(
+            "ConnectionStateMachine",
+            QString("Connected-drop grace expired but facade recovered to state=%1")
+                .arg(static_cast<int>(facadeState)));
+        return;
+    }
+
+    handleError("Lost connection to crankshaft-core service");
+}
+
 // Private methods
 auto ConnectionStateMachine::transitionToState(State newState) -> void {
     if (m_currentState == newState) {
@@ -276,6 +366,7 @@ auto ConnectionStateMachine::transitionToState(State newState) -> void {
             stopRetryTimer();
             m_connectionTimeout->stop();
             m_connectionTimeoutDeadline = QDateTime();
+            cancelConnectedDropGrace();
             break;
 
         case State::Disconnected:
@@ -323,6 +414,31 @@ auto ConnectionStateMachine::calculateRetryDelay() const -> int {
 
     // Cap at maximum delay
     return qMin(delay, MAX_RETRY_DELAY_MS);
+}
+
+auto ConnectionStateMachine::startConnectedDropGrace() -> void {
+    if (m_connectedDropGracePending) {
+        // Keep a single bounded grace window across repeated disconnect signals.
+        return;
+    }
+
+    m_connectedDropGracePending = true;
+    m_connectedDropGraceDeadline = QDateTime::currentDateTime().addMSecs(CONNECTED_DROP_GRACE_MS);
+
+    Logger::instance().warningContext(
+        "ConnectionStateMachine",
+        QString("Starting connected-drop grace timer: %1ms").arg(CONNECTED_DROP_GRACE_MS));
+
+    m_connectedDropGraceTimer->start(CONNECTED_DROP_GRACE_MS);
+}
+
+auto ConnectionStateMachine::cancelConnectedDropGrace() -> void {
+    if (m_connectedDropGraceTimer->isActive()) {
+        m_connectedDropGraceTimer->stop();
+    }
+
+    m_connectedDropGracePending = false;
+    m_connectedDropGraceDeadline = QDateTime();
 }
 
 auto ConnectionStateMachine::isValidTransition(State from, State to) const -> bool {

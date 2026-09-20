@@ -21,6 +21,14 @@ export DEBIAN_FRONTEND=noninteractive
 
 case "$1" in
     configure)
+        # Ensure network probing utility exists for ExecStartPre readiness checks.
+        if ! command -v nc >/dev/null 2>&1; then
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get update >/dev/null 2>&1 || true
+                DEBIAN_FRONTEND=noninteractive apt-get install -y netcat-openbsd >/dev/null 2>&1 || true
+            fi
+        fi
+
         # Ensure crankshaft user exists even if slim UI package is installed first.
         if ! id -u crankshaft > /dev/null 2>&1; then
             if command -v adduser >/dev/null 2>&1; then
@@ -58,8 +66,10 @@ case "$1" in
         # Reload systemd and enable service when running under systemd
         if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             systemctl daemon-reload >/dev/null 2>&1 || true
-            systemctl enable crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
-            systemctl enable crankshaft-ui-slim.service >/dev/null 2>&1 || true
+            systemctl reenable crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || \
+                systemctl enable crankshaft-ui-slim-display-setup.service >/dev/null 2>&1 || true
+            systemctl reenable crankshaft-ui-slim.service >/dev/null 2>&1 || \
+                systemctl enable crankshaft-ui-slim.service >/dev/null 2>&1 || true
         else
             echo "Systemd not detected; skipping service enable." >&2
         fi

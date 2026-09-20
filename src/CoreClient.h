@@ -23,6 +23,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QSize>
@@ -59,6 +62,8 @@ public:
                               int keyCode = -1) -> void;
     virtual auto publish(const QString& topic, const QJsonObject& payload) -> void;
 
+    [[nodiscard]] auto videoTransportMode() const -> QString { return m_videoTransportMode; }
+
 signals:
     void connectionStateChanged(int state);
     void bluetoothEventReceived(const QString& topic, const QVariantMap& payload);
@@ -69,6 +74,9 @@ signals:
     void videoStateChanged(bool active);
     void projectionReadyChanged(bool ready);
     void videoFrameReceived(const QString& frameUrl, int width, int height);
+    void videoH264FrameReceived(const QByteArray& frameData, int width, int height);
+    void videoTransportModeChanged(const QString& mode);
+    void webRtcSignalingReceived(const QString& topic, const QVariantMap& payload);
     void connectionError(const QString& error);
 
 private slots:
@@ -84,6 +92,7 @@ private:
     auto advanceCandidate() -> void;
     auto connectToCore() -> void;
     auto subscribeToTopics() -> void;
+    auto sendClientHello() -> void;
     auto parseAndHandleEvent(const QJsonDocument& doc) -> void;
 
     ConnectionState m_state = ConnectionState::Disconnected;
@@ -98,9 +107,31 @@ private:
     bool m_hasConnected = false;
     bool m_reconnectScheduled = false;
     bool m_ignoreNextDisconnectFromAbort = false;
+    bool m_transientDisconnectHoldActive = false;
+    int m_reconnectAttempt = 0;
+    qint64 m_lastReconnectLogMs = 0;
     bool m_hasLoggedFirstVideoFrame = false;
+    quint64 m_h264EventCount = 0;
+    quint64 m_h264EmitCount = 0;
+    QElapsedTimer m_lastH264EventArrival;
+    QElapsedTimer m_lastH264Emit;
+    quint64 m_touchEventSendCount = 0;
     bool m_projectionReady = false;
     bool m_videoReady = false;
     bool m_audioReady = false;
+    QString m_videoTransportMode;
+    QString m_videoTransportRequestedMode;
+    QString m_videoTransportFallbackReason;
+    QString m_clientKind = QStringLiteral("ui-slim");
+    QString m_clientVersion = QStringLiteral("unknown");
+    int m_clientProtocolVersion = 1;
+    QSet<QString> m_capabilities{QStringLiteral("android_auto"), QStringLiteral("webrtc"),
+                                 QStringLiteral("touch_input"), QStringLiteral("key_input")};
+    bool m_clientHelloSent = false;
     QTimer* m_connectTimeoutTimer = nullptr;
+    QTimer* m_transientDisconnectHoldTimer = nullptr;
+    int m_transientDisconnectHoldMs = 1500;
+
+    [[nodiscard]] auto nextReconnectDelayMs() -> int;
+    auto clearProjectionState(bool emitSignals, bool clearTransportMode) -> void;
 };

@@ -21,6 +21,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtMultimedia
 import QtQuick.Window
 import "components"
 
@@ -404,35 +405,150 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     color: theme.colors.background
+                    readonly property bool webRtcSelected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "webrtc"
+                    readonly property bool h264Selected: _androidAutoFacade && _androidAutoFacade.videoTransportMode && _androidAutoFacade.videoTransportMode.toLowerCase() === "websocket-h264"
+                    readonly property bool webRtcHealthy: _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.active && _androidAutoWebRtcReceiver.healthy
+                    readonly property bool webRtcFallbackRequested: webRtcSelected && _androidAutoWebRtcReceiver && _androidAutoWebRtcReceiver.fallbackRecommended
+                    readonly property int webRtcFallbackDelayMs: 2500
+                    property bool webRtcDisplayLatched: false
+                    readonly property bool webRtcActive: webRtcSelected && webRtcDisplayLatched
+                    readonly property bool webRtcFallbackActive: webRtcSelected && !webRtcActive && webRtcFallbackRequested
+
+                    function logRenderState(reason) {
+                        console.log("[AAProjectionView] render-state reason=" + reason +
+                                    " selected=" + webRtcSelected +
+                                    " healthy=" + webRtcHealthy +
+                                    " fallbackRequested=" + webRtcFallbackRequested +
+                                    " latched=" + webRtcDisplayLatched +
+                                    " webrtcActive=" + webRtcActive +
+                                    " fallbackActive=" + webRtcFallbackActive)
+                    }
+
+                    function recomputeRenderMode(reason) {
+                        if (!webRtcSelected) {
+                            if (webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.stop()
+                            }
+                            if (webRtcDisplayLatched) {
+                                webRtcDisplayLatched = false
+                                logRenderState(reason + ":transport-not-webrtc")
+                            }
+                            return
+                        }
+
+                        if (webRtcHealthy) {
+                            if (webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.stop()
+                            }
+                            if (!webRtcDisplayLatched) {
+                                webRtcDisplayLatched = true
+                            }
+                            logRenderState(reason + ":healthy")
+                            return
+                        }
+
+                        if (webRtcDisplayLatched && webRtcFallbackRequested) {
+                            if (!webRtcFallbackDelayTimer.running) {
+                                webRtcFallbackDelayTimer.start()
+                                logRenderState(reason + ":fallback-delay-start")
+                            }
+                            return
+                        }
+
+                        if (!webRtcDisplayLatched && webRtcFallbackRequested) {
+                            logRenderState(reason + ":fallback-active")
+                        }
+                    }
+
+                    Timer {
+                        id: webRtcFallbackDelayTimer
+                        interval: projectionSurface.webRtcFallbackDelayMs
+                        repeat: false
+                        running: false
+                        onTriggered: {
+                            if (projectionSurface.webRtcSelected &&
+                                projectionSurface.webRtcDisplayLatched &&
+                                projectionSurface.webRtcFallbackRequested &&
+                                !projectionSurface.webRtcHealthy) {
+                                projectionSurface.webRtcDisplayLatched = false
+                                projectionSurface.logRenderState("fallback-delay-triggered")
+                            }
+                        }
+                    }
+
+                    onWebRtcSelectedChanged: recomputeRenderMode("webRtcSelectedChanged")
+                    onWebRtcHealthyChanged: recomputeRenderMode("webRtcHealthyChanged")
+                    onWebRtcFallbackRequestedChanged: recomputeRenderMode("webRtcFallbackRequestedChanged")
+                    onWebRtcDisplayLatchedChanged: logRenderState("webRtcDisplayLatchedChanged")
+                    Component.onCompleted: recomputeRenderMode("componentCompleted")
+
+                    Connections {
+                        target: _androidAutoWebRtcReceiver
+                        ignoreUnknownSignals: true
+
+                        function onActiveChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.activeChanged")
+                        }
+
+                        function onHealthyChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.healthyChanged")
+                        }
+
+                        function onStalledChanged() {
+                            projectionSurface.logRenderState("receiver.stalledChanged")
+                        }
+
+                        function onRecoverableErrorChanged() {
+                            projectionSurface.logRenderState("receiver.recoverableErrorChanged")
+                        }
+
+                        function onFallbackRecommendedChanged() {
+                            projectionSurface.recomputeRenderMode("receiver.fallbackRecommendedChanged")
+                        }
+                    }
+
+                    function videoContentRect() {
+                        if (projectionVideoLoader.item && projectionVideoLoader.item.contentRect) {
+                            return projectionVideoLoader.item.contentRect
+                        }
+                        return Qt.rect(0, 0, 0, 0)
+                    }
 
                     function updateTouchForwarderDisplaySize() {
                         if (!_touchForwarder) {
                             return
                         }
 
-                        var mappedWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width
-                        var mappedHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height
+                        var videoRect = videoContentRect()
+                        var mappedWidth = (webRtcActive || h264Selected) && videoRect.width > 0
+                            ? videoRect.width
+                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
+                        var mappedHeight = (webRtcActive || h264Selected) && videoRect.height > 0
+                            ? videoRect.height
+                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
                         _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
 
-                        var aaWidth = _androidAutoFacade && _androidAutoFacade.projectionWidth > 0
-                            ? _androidAutoFacade.projectionWidth
-                            : mappedWidth
-                        var aaHeight = _androidAutoFacade && _androidAutoFacade.projectionHeight > 0
-                            ? _androidAutoFacade.projectionHeight
-                            : mappedHeight
-                        _touchForwarder.androidAutoSize = Qt.size(aaWidth, aaHeight)
                     }
 
                     function mapToProjectionCoordinates(rawX, rawY) {
-                        var frameWidth = projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width
-                        var frameHeight = projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height
+                        var videoRect = videoContentRect()
+                        var frameWidth = (webRtcActive || h264Selected) && videoRect.width > 0
+                            ? videoRect.width
+                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
+                        var frameHeight = (webRtcActive || h264Selected) && videoRect.height > 0
+                            ? videoRect.height
+                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
 
                         if (frameWidth <= 0 || frameHeight <= 0) {
                             return { x: 0, y: 0 }
                         }
 
-                        var frameLeft = (projectionImage.width - frameWidth) / 2
-                        var frameTop = (projectionImage.height - frameHeight) / 2
+                        var frameLeft = (webRtcActive || h264Selected) && videoRect.width > 0
+                            ? videoRect.x
+                            : (projectionImage.width - frameWidth) / 2
+                        var frameTop = (webRtcActive || h264Selected) && videoRect.height > 0
+                            ? videoRect.y
+                            : (projectionImage.height - frameHeight) / 2
 
                         var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
                         var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
@@ -557,6 +673,60 @@ ApplicationWindow {
                         }
                     }
                     
+                    Loader {
+                        id: projectionVideoLoader
+                        anchors.fill: parent
+                        anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
+                        active: projectionSurface.webRtcActive
+                        source: "qrc:/qml/components/WebRtcVideoOutput.qml"
+
+                        onLoaded: {
+                            if (item) {
+                                item.sinkObject = _androidAutoWebRtcReceiver ? _androidAutoWebRtcReceiver.videoSinkObject : null
+                                projectionSurface.updateTouchForwarderDisplaySize()
+                            }
+                        }
+
+                        onItemChanged: {
+                            projectionSurface.updateTouchForwarderDisplaySize()
+                        }
+
+                        onActiveChanged: {
+                            projectionSurface.logRenderState("projectionVideoLoader.activeChanged")
+                        }
+                    }
+
+                    VideoOutput {
+                        id: h264VideoOutput
+                        anchors.fill: parent
+                        fillMode: VideoOutput.PreserveAspectFit
+                        visible: projectionSurface.h264Selected
+
+                        Component.onCompleted: {
+          console.log("[H264-DIAG] VideoOutput completed; videoSink=", videoSink,
+                      "contentRect=", contentRect)
+          if (_androidAutoFacade) {
+              _androidAutoFacade.setProjectionVideoSink(videoSink)
+              _androidAutoFacade.logProjectionVideoSinkState()
+          } else {
+              console.log("[H264-DIAG] _androidAutoFacade is null")
+          }
+      }
+
+      onContentRectChanged: {
+          console.log("[H264-DIAG] contentRectChanged:", contentRect)
+          projectionSurface.updateTouchForwarderDisplaySize()
+      }
+                    }
+
+                    Connections {
+                        target: projectionVideoLoader.item
+                        ignoreUnknownSignals: true
+                        function onContentRectChanged() {
+                            projectionSurface.updateTouchForwarderDisplaySize()
+                        }
+                    }
+
                     Image {
                         id: projectionImage
                         anchors.fill: parent
@@ -565,18 +735,30 @@ ApplicationWindow {
                         smooth: true
                         cache: false
                         source: _androidAutoFacade ? _androidAutoFacade.projectionFrameUrl : ""
-                        visible: source !== ""
+                        // Decode incoming JPEG fallback frames off the QML GUI thread
+                        // and retain the last completed frame while the next frame
+                        // is loading.  On low-power hardware (notably RPi3),
+                        // synchronous base64/JPEG decoding can block the render loop
+                        // and make the projection visibly flicker between frames.
+                        asynchronous: true
+                        retainWhileLoading: true
+                        visible: !projectionSurface.webRtcActive && !projectionSurface.h264Selected && source !== ""
 
                         onPaintedWidthChanged: projectionSurface.updateTouchForwarderDisplaySize()
                         onPaintedHeightChanged: projectionSurface.updateTouchForwarderDisplaySize()
-                    }
 
-                    Connections {
-                        target: _androidAutoFacade
-                        function onProjectionFrameChanged() {
-                            projectionSurface.updateTouchForwarderDisplaySize()
+                        onVisibleChanged: {
+                            projectionSurface.logRenderState("projectionImage.visibleChanged")
                         }
                     }
+
+                    // Note: onProjectionFrameChanged is intentionally NOT connected here.
+                    // That signal fires on every decoded video frame (~30 fps).  Calling
+                    // updateTouchForwarderDisplaySize() at frame rate publishes a WebSocket
+                    // 'android-auto/display/resolution' message to crankshaft-core on every
+                    // frame, which triggers GStreamer pipeline reconfiguration events that
+                    // cause visible HDMI flicker.  Genuine resize events are covered by the
+                    // onPaintedWidth/HeightChanged handlers above.
 
                     Text {
                         anchors.centerIn: parent
@@ -585,12 +767,13 @@ ApplicationWindow {
                         font.pixelSize: theme.typography.h4
                         font.family: theme.typography.fontFamily
                         horizontalAlignment: Text.AlignHCenter
-                        visible: !projectionImage.visible
+                        visible: (!projectionSurface.webRtcActive && !projectionSurface.h264Selected && !projectionImage.visible) ||
+                                 (projectionSurface.webRtcActive && projectionSurface.videoContentRect().width <= 0)
                     }
 
                     MultiPointTouchArea {
                         id: projectionTouchArea
-                        anchors.fill: projectionImage
+                        anchors.fill: parent
                         minimumTouchPoints: 1
                         maximumTouchPoints: 10
 
@@ -623,7 +806,7 @@ ApplicationWindow {
                     }
 
                     MouseArea {
-                        anchors.fill: projectionImage
+                        anchors.fill: parent
                         enabled: !projectionTouchArea.enabled
 
                         property bool isPressed: false

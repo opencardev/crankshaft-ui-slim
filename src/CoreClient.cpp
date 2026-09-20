@@ -22,8 +22,10 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QCoreApplication>
 #include <QUrl>
 #include <QTimer>
+#include <QThread>
 
 #include "Logger.h"
 
@@ -53,7 +55,24 @@ auto socketStateToString(QAbstractSocket::SocketState state) -> QString {
 CoreClient::CoreClient(QObject* parent)
         : QObject(parent),
             m_primaryCoreUrl(m_coreUrl),
-            m_connectTimeoutTimer(new QTimer(this)) {}
+            m_connectTimeoutTimer(new QTimer(this)),
+            m_transientDisconnectHoldTimer(new QTimer(this)) {
+    const QString runtimeVersion = QCoreApplication::applicationVersion().trimmed();
+    if (!runtimeVersion.isEmpty()) {
+        m_clientVersion = runtimeVersion;
+    }
+
+    m_transientDisconnectHoldTimer->setSingleShot(true);
+    connect(m_transientDisconnectHoldTimer, &QTimer::timeout, this, [this]() {
+        m_transientDisconnectHoldActive = false;
+        if (m_shutdownRequested ||
+            (m_webSocket && m_webSocket->state() == QAbstractSocket::ConnectedState)) {
+            return;
+        }
+
+        clearProjectionState(/*emitSignals=*/true, /*clearTransportMode=*/true);
+    });
+}
 
 CoreClient::~CoreClient() {
     if (m_webSocket) {
@@ -66,6 +85,7 @@ auto CoreClient::initialize() -> bool {
     m_shutdownRequested = false;
     m_reconnectScheduled = false;
     m_hasConnected = false;
+    m_reconnectAttempt = 0;
 
     m_connectTimeoutTimer->setSingleShot(true);
     connect(m_connectTimeoutTimer, &QTimer::timeout, this, [this]() {
@@ -87,12 +107,15 @@ auto CoreClient::initialize() -> bool {
 
         if (!m_reconnectScheduled) {
             m_reconnectScheduled = true;
+            const int reconnectDelayMs = nextReconnectDelayMs();
             Logger::instance().infoContext(
                 "CoreClient",
-                QString("Scheduling reconnect after timeout in 500ms (candidate=%1/%2)")
+                QString("Scheduling reconnect after timeout in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                    .arg(reconnectDelayMs)
                     .arg(m_currentCandidateIndex + 1)
-                    .arg(m_connectionCandidates.size()));
-            QTimer::singleShot(500, this, &CoreClient::connectToCore);
+                    .arg(m_connectionCandidates.size())
+                    .arg(m_reconnectAttempt));
+            QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
         }
     });
 
@@ -105,6 +128,11 @@ auto CoreClient::initialize() -> bool {
 auto CoreClient::shutdown() -> void {
     m_shutdownRequested = true;
     m_reconnectScheduled = false;
+    m_reconnectAttempt = 0;
+    m_transientDisconnectHoldActive = false;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->stop();
+    }
     if (m_connectTimeoutTimer) {
         m_connectTimeoutTimer->stop();
     }
@@ -113,12 +141,7 @@ auto CoreClient::shutdown() -> void {
         m_webSocket->close();
     }
     emit connectedDeviceChanged(QString());
-    emit audioStateChanged(false);
-    emit videoStateChanged(false);
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    emit projectionReadyChanged(false);
+    clearProjectionState(/*emitSignals=*/true, /*clearTransportMode=*/true);
     Logger::instance().infoContext("CoreClient", "Shutdown WebSocket core client");
 }
 
@@ -243,13 +266,51 @@ auto CoreClient::subscribeToTopics() -> void {
     mediaSubscription["topic"] = "android-auto/media/*";
     m_webSocket->sendTextMessage(QJsonDocument(mediaSubscription).toJson(QJsonDocument::Compact));
 
+    QJsonObject webRtcSubscription;
+    webRtcSubscription["type"] = "subscribe";
+    webRtcSubscription["topic"] = "android-auto/webrtc/*";
+    m_webSocket->sendTextMessage(QJsonDocument(webRtcSubscription).toJson(QJsonDocument::Compact));
+
     QJsonObject btSubscription;
     btSubscription["type"] = "subscribe";
     btSubscription["topic"] = "bluetooth/#";
     m_webSocket->sendTextMessage(QJsonDocument(btSubscription).toJson(QJsonDocument::Compact));
 
     Logger::instance().infoContext("CoreClient",
-                                   "Subscribed to android-auto/status/*, android-auto/media/*, bluetooth/#");
+                                   "Subscribed to android-auto/status/*, android-auto/media/*, android-auto/webrtc/*, bluetooth/#");
+}
+
+auto CoreClient::sendClientHello() -> void {
+    if (!m_webSocket || m_webSocket->state() != QAbstractSocket::ConnectedState) {
+        Logger::instance().warningContext("CoreClient", "Cannot send client hello: WebSocket not connected");
+        return;
+    }
+
+    QJsonArray caps;
+    for (const QString& capability : m_capabilities) {
+        caps.append(capability);
+    }
+
+    QJsonObject payload;
+    payload["client_kind"] = m_clientKind;
+    payload["client_version"] = m_clientVersion;
+    payload["client_protocol_version"] = m_clientProtocolVersion;
+    payload["capabilities"] = caps;
+
+    QJsonObject helloMessage;
+    helloMessage["type"] = "client_hello";
+    helloMessage["payload"] = payload;
+
+    m_webSocket->sendTextMessage(QJsonDocument(helloMessage).toJson(QJsonDocument::Compact));
+    m_clientHelloSent = true;
+
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("Sent client hello (kind=%1 version=%2 protocol=%3 capabilities=%4)")
+            .arg(m_clientKind)
+            .arg(m_clientVersion)
+            .arg(m_clientProtocolVersion)
+            .arg(QStringList(m_capabilities.values()).join(",")));
 }
 
 auto CoreClient::publish(const QString& topic, const QJsonObject& payload) -> void {
@@ -332,24 +393,54 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
     }
 
     if (points.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: empty point list");
         return;
     }
 
     const QVariantMap firstPoint = points.first().toMap();
     if (firstPoint.isEmpty()) {
+        Logger::instance().warningContext("CoreClient", "Cannot send touch event: first point is empty");
         return;
     }
 
+    const double x = firstPoint.value("x").toDouble();
+    const double y = firstPoint.value("y").toDouble();
+    const int pointerId = firstPoint.value("id", 0).toInt();
+    const double pressure = firstPoint.value("pressure", 1.0).toDouble();
+
     QJsonObject touchPayload;
-    touchPayload["x"] = firstPoint.value("x").toDouble();
-    touchPayload["y"] = firstPoint.value("y").toDouble();
+    touchPayload["x"] = x;
+    touchPayload["y"] = y;
     touchPayload["action"] = eventType;
 
     QJsonObject touchMessage;
     touchMessage["type"] = "publish";
     touchMessage["topic"] = "android-auto/touch";
     touchMessage["payload"] = touchPayload;
-    m_webSocket->sendTextMessage(QJsonDocument(touchMessage).toJson(QJsonDocument::Compact));
+
+    const QByteArray wireMessage =
+        QJsonDocument(touchMessage).toJson(QJsonDocument::Compact);
+
+    ++m_touchEventSendCount;
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
+                "points=%7 bytes=%8 socketState=%9")
+            .arg(m_touchEventSendCount)
+            .arg(eventType)
+            .arg(x, 0, 'f', 2)
+            .arg(y, 0, 'f', 2)
+            .arg(pointerId)
+            .arg(pressure, 0, 'f', 2)
+            .arg(points.size())
+            .arg(wireMessage.size())
+            .arg(static_cast<int>(m_webSocket->state())));
+
+    m_webSocket->sendTextMessage(QString::fromUtf8(wireMessage));
+
+    Logger::instance().infoContext(
+        "CoreClient",
+        QString("AA touch WS send queued #%1").arg(m_touchEventSendCount));
 }
 
 auto CoreClient::sendKeyEvent(const QString& keyName, const QString& action, int keyCode) -> void {
@@ -399,6 +490,13 @@ void CoreClient::onWebSocketConnected() {
     m_isConnecting = false;
     m_hasConnected = true;
     m_reconnectScheduled = false;
+    m_reconnectAttempt = 0;
+    m_transientDisconnectHoldActive = false;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->stop();
+    }
+    m_clientHelloSent = false;
+    sendClientHello();
     subscribeToTopics();
 }
 
@@ -429,21 +527,22 @@ void CoreClient::onWebSocketDisconnected() {
         m_connectTimeoutTimer->stop();
     }
     m_isConnecting = false;
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    emit projectionReadyChanged(false);
-    emit videoStateChanged(false);
-    emit audioStateChanged(false);
+    m_transientDisconnectHoldActive = true;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->start(m_transientDisconnectHoldMs);
+    }
 
     if (!m_shutdownRequested && !m_reconnectScheduled) {
         m_reconnectScheduled = true;
+        const int reconnectDelayMs = nextReconnectDelayMs();
         Logger::instance().infoContext(
             "CoreClient",
-            QString("Scheduling reconnect after disconnect in 2000ms (candidate=%1/%2)")
+            QString("Scheduling reconnect after disconnect in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                .arg(reconnectDelayMs)
                 .arg(m_currentCandidateIndex + 1)
-                .arg(m_connectionCandidates.size()));
-        QTimer::singleShot(2000, this, &CoreClient::connectToCore);
+                .arg(m_connectionCandidates.size())
+                .arg(m_reconnectAttempt));
+        QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
     }
 }
 
@@ -453,12 +552,10 @@ void CoreClient::onWebSocketError(QAbstractSocket::SocketError error) {
     if (m_connectTimeoutTimer) {
         m_connectTimeoutTimer->stop();
     }
-    m_projectionReady = false;
-    m_videoReady = false;
-    m_audioReady = false;
-    emit projectionReadyChanged(false);
-    emit videoStateChanged(false);
-    emit audioStateChanged(false);
+    m_transientDisconnectHoldActive = true;
+    if (m_transientDisconnectHoldTimer) {
+        m_transientDisconnectHoldTimer->start(m_transientDisconnectHoldMs);
+    }
 
     QString errorMsg;
     switch (error) {
@@ -491,12 +588,59 @@ void CoreClient::onWebSocketError(QAbstractSocket::SocketError error) {
 
     if (!m_shutdownRequested && !m_reconnectScheduled) {
         m_reconnectScheduled = true;
+        const int reconnectDelayMs = nextReconnectDelayMs();
         Logger::instance().infoContext(
             "CoreClient",
-            QString("Scheduling reconnect after socket error in 2000ms (candidate=%1/%2)")
+            QString("Scheduling reconnect after socket error in %1ms (candidate=%2/%3, reconnectAttempt=%4)")
+                .arg(reconnectDelayMs)
                 .arg(m_currentCandidateIndex + 1)
-                .arg(m_connectionCandidates.size()));
-        QTimer::singleShot(2000, this, &CoreClient::connectToCore);
+                .arg(m_connectionCandidates.size())
+                .arg(m_reconnectAttempt));
+        QTimer::singleShot(reconnectDelayMs, this, &CoreClient::connectToCore);
+    }
+}
+
+auto CoreClient::nextReconnectDelayMs() -> int {
+    const int cappedAttempt = qBound(0, m_reconnectAttempt, 7);
+    const int delayMs = qBound(500, 500 * (1 << cappedAttempt), 30000);
+    m_reconnectAttempt = qMin(m_reconnectAttempt + 1, 8);
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastReconnectLogMs == 0 || (nowMs - m_lastReconnectLogMs) > 30000) {
+        m_lastReconnectLogMs = nowMs;
+    }
+
+    return delayMs;
+}
+
+auto CoreClient::clearProjectionState(bool emitSignals, bool clearTransportMode) -> void {
+    const bool projectionChanged = m_projectionReady;
+    const bool videoChanged = m_videoReady;
+    const bool audioChanged = m_audioReady;
+
+    m_projectionReady = false;
+    m_videoReady = false;
+    m_audioReady = false;
+
+    if (clearTransportMode && !m_videoTransportMode.isEmpty()) {
+        m_videoTransportMode.clear();
+        if (emitSignals) {
+            emit videoTransportModeChanged(m_videoTransportMode);
+        }
+    }
+
+    if (!emitSignals) {
+        return;
+    }
+
+    if (projectionChanged) {
+        emit projectionReadyChanged(false);
+    }
+    if (videoChanged) {
+        emit videoStateChanged(false);
+    }
+    if (audioChanged) {
+        emit audioStateChanged(false);
     }
 }
 
@@ -517,6 +661,22 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
     if (msgType == "event") {
         QString topic = obj.value("topic").toString();
         QJsonObject payload = obj.value("payload").toObject();
+
+        if (topic == "android-auto/media/video-frame") {
+            ++m_h264EventCount;
+            const qint64 eventIntervalMs =
+                m_lastH264EventArrival.isValid() ? m_lastH264EventArrival.elapsed() : -1;
+            m_lastH264EventArrival.restart();
+
+            if (m_h264EventCount == 1 || (m_h264EventCount % 30) == 0) {
+                Logger::instance().infoContext(
+                    "CoreClient", "H.264 media event arrival cadence",
+                    {{"count", m_h264EventCount},
+                     {"interval_ms", eventIntervalMs},
+                     {"core_thread",
+                      QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+            }
+        }
 
         Logger::instance().debugContext("CoreClient", QString("Received event: %1").arg(topic));
 
@@ -558,6 +718,10 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             emit connectedDeviceChanged(serialNumber);
 
         } else if (topic == "android-auto/status/disconnected") {
+            m_transientDisconnectHoldActive = false;
+            if (m_transientDisconnectHoldTimer) {
+                m_transientDisconnectHoldTimer->stop();
+            }
             m_projectionReady = false;
             m_videoReady = false;
             m_audioReady = false;
@@ -571,6 +735,10 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
         } else if (topic == "android-auto/status/error") {
             QString errorMsg = payload.value("error").toString("Unknown error");
             Logger::instance().errorContext("CoreClient", QString("Core error: %1").arg(errorMsg));
+            m_transientDisconnectHoldActive = false;
+            if (m_transientDisconnectHoldTimer) {
+                m_transientDisconnectHoldTimer->stop();
+            }
             m_projectionReady = false;
             m_videoReady = false;
             m_audioReady = false;
@@ -587,20 +755,54 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const bool serviceDiscoveryCompleted = payload.value("service_discovery_completed").toBool(false);
             const QString connectionStateName = payload.value("connection_state_name").toString();
             const QString reason = payload.value("reason").toString();
+            const QString reportedVideoTransportMode =
+                payload.value("video_transport_mode").toString();
+            const QString reportedVideoTransportRequestedMode =
+                payload.value("video_transport_requested").toString();
+            const QString reportedVideoTransportFallbackReason =
+                payload.value("video_transport_fallback_reason").toString();
+            const QString newVideoTransportMode =
+                reportedVideoTransportMode.trimmed().isEmpty()
+                    ? m_videoTransportMode
+                    : reportedVideoTransportMode.trimmed().toLower();
+            const QString newVideoTransportRequestedMode =
+                reportedVideoTransportRequestedMode.trimmed().isEmpty()
+                    ? m_videoTransportRequestedMode
+                    : reportedVideoTransportRequestedMode.trimmed().toLower();
             const bool coreReportsConnected =
                 connectionStateName.compare(QStringLiteral("CONNECTED"), Qt::CaseInsensitive) == 0;
+
+            if ((newProjectionReady || newVideoReady || newAudioReady || coreReportsConnected) &&
+                m_transientDisconnectHoldActive) {
+                m_transientDisconnectHoldActive = false;
+                if (m_transientDisconnectHoldTimer) {
+                    m_transientDisconnectHoldTimer->stop();
+                }
+            }
+
+            m_videoTransportRequestedMode = newVideoTransportRequestedMode;
+            m_videoTransportFallbackReason = reportedVideoTransportFallbackReason.trimmed();
 
             Logger::instance().debugContext(
                 "CoreClient",
                 QString("channel-status: state=%1 projection_ready=%2 video_ready=%3 media_audio_ready=%4 "
-                        "control_version_received=%5 service_discovery_completed=%6 reason=%7")
+                        "control_version_received=%5 service_discovery_completed=%6 video_transport_mode=%7 "
+                        "video_transport_requested=%8 video_transport_fallback_reason=%9 reason=%10")
                     .arg(connectionStateName)
                     .arg(newProjectionReady ? "true" : "false")
                     .arg(newVideoReady ? "true" : "false")
                     .arg(newAudioReady ? "true" : "false")
                     .arg(controlVersionReceived ? "true" : "false")
                     .arg(serviceDiscoveryCompleted ? "true" : "false")
+                    .arg(newVideoTransportMode)
+                    .arg(newVideoTransportRequestedMode)
+                    .arg(m_videoTransportFallbackReason)
                     .arg(reason));
+
+            if (newVideoTransportMode != m_videoTransportMode) {
+                m_videoTransportMode = newVideoTransportMode;
+                emit videoTransportModeChanged(m_videoTransportMode);
+            }
 
             if (newVideoReady != m_videoReady) {
                 if (m_state == ConnectionState::Connected && !newVideoReady && coreReportsConnected) {
@@ -636,6 +838,20 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
 
             if (coreReportsConnected && m_state != ConnectionState::Connected) {
                 setState(ConnectionState::Connected);
+            } else if (connectionStateName.compare(QStringLiteral("CONNECTING"), Qt::CaseInsensitive) == 0 ||
+                       connectionStateName.compare(QStringLiteral("AUTHENTICATING"), Qt::CaseInsensitive) == 0 ||
+                       connectionStateName.compare(QStringLiteral("SECURING"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Connecting) {
+                    setState(ConnectionState::Connecting);
+                }
+            } else if (connectionStateName.compare(QStringLiteral("SEARCHING"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Searching) {
+                    setState(ConnectionState::Searching);
+                }
+            } else if (connectionStateName.compare(QStringLiteral("ERROR"), Qt::CaseInsensitive) == 0) {
+                if (m_state != ConnectionState::Error) {
+                    setState(ConnectionState::Error);
+                }
             } else if (m_state == ConnectionState::Connected && !m_projectionReady) {
                 Logger::instance().debugContext(
                     "CoreClient",
@@ -651,7 +867,44 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             const int width = payload.value("width").toInt();
             const int height = payload.value("height").toInt();
 
-            if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
+            if (!encodedData.isEmpty() && encoding == "h264-base64") {
+                QElapsedTimer h264Base64Timer;
+                h264Base64Timer.start();
+                const QByteArray frameData = QByteArray::fromBase64(encodedData.toLatin1());
+                const qint64 h264Base64ElapsedMs = h264Base64Timer.elapsed();
+                if (!frameData.isEmpty()) {
+                    ++m_h264EmitCount;
+                    const qint64 emitIntervalMs =
+                        m_lastH264Emit.isValid() ? m_lastH264Emit.elapsed() : -1;
+                    m_lastH264Emit.restart();
+
+                    if (m_h264EmitCount == 1 || (m_h264EmitCount % 30) == 0) {
+                        Logger::instance().infoContext(
+                            "CoreClient", "H.264 frame emission cadence",
+                            {{"count", m_h264EmitCount},
+                             {"emit_interval_ms", emitIntervalMs},
+                             {"base64_decode_ms", h264Base64ElapsedMs},
+                             {"encoded_size", encodedData.size()},
+                             {"decoded_size", frameData.size()},
+                             {"core_thread",
+                              QString::number(reinterpret_cast<quintptr>(QThread::currentThread()), 16)}});
+                    }
+                    if (!m_hasLoggedFirstVideoFrame) {
+                        m_hasLoggedFirstVideoFrame = true;
+                        Logger::instance().infoContext(
+                            "CoreClient", "First android-auto/media/video-frame event received",
+                            {{"encoding", encoding},
+                             {"width", width},
+                             {"height", height},
+                             {"payload_size", encodedData.size()}});
+                    }
+                    emit videoH264FrameReceived(frameData, width, height);
+                    if (!m_videoReady) {
+                        m_videoReady = true;
+                        emit videoStateChanged(true);
+                    }
+                }
+            } else if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
                 if (!m_hasLoggedFirstVideoFrame) {
                     m_hasLoggedFirstVideoFrame = true;
                     Logger::instance().infoContext(
@@ -664,8 +917,14 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
 
                 const QString frameUrl = QStringLiteral("data:image/jpeg;base64,%1").arg(encodedData);
                 emit videoFrameReceived(frameUrl, width, height);
-                emit videoStateChanged(true);
+
+                if (!m_videoReady) {
+                    m_videoReady = true;
+                    emit videoStateChanged(true);
+                }
             }
+        } else if (topic.startsWith(QStringLiteral("android-auto/webrtc/"))) {
+            emit webRtcSignalingReceived(topic, payload.toVariantMap());
         } else if (topic.startsWith(QStringLiteral("bluetooth/"))) {
             emit bluetoothEventReceived(topic, payload.toVariantMap());
         }
