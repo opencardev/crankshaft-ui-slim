@@ -422,25 +422,32 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
         QJsonDocument(touchMessage).toJson(QJsonDocument::Compact);
 
     ++m_touchEventSendCount;
-    Logger::instance().infoContext(
-        "CoreClient",
-        QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
-                "points=%7 bytes=%8 socketState=%9")
-            .arg(m_touchEventSendCount)
-            .arg(eventType)
-            .arg(x, 0, 'f', 2)
-            .arg(y, 0, 'f', 2)
-            .arg(pointerId)
-            .arg(pressure, 0, 'f', 2)
-            .arg(points.size())
-            .arg(wireMessage.size())
-            .arg(static_cast<int>(m_webSocket->state())));
+
+    // Touch move events can arrive at 60+ Hz.  Logging every move synchronously
+    // on the UI thread can starve Qt Quick input/rendering on low-power devices
+    // such as Raspberry Pi 3.  Keep press/release/cancel at info level and make
+    // move diagnostics debug-only and periodic.
+    const bool logTouchEvent = eventType != QStringLiteral("move");
+    if (logTouchEvent) {
+        Logger::instance().infoContext(
+            "CoreClient",
+            QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
+                    "points=%7 bytes=%8")
+                .arg(m_touchEventSendCount)
+                .arg(eventType)
+                .arg(x, 0, 'f', 2)
+                .arg(y, 0, 'f', 2)
+                .arg(pointerId)
+                .arg(pressure, 0, 'f', 2)
+                .arg(points.size())
+                .arg(wireMessage.size()));
+    } else if ((m_touchEventSendCount % 60) == 0) {
+        Logger::instance().debugContext(
+            "CoreClient",
+            QString("AA touch move traffic: %1 sends").arg(m_touchEventSendCount));
+    }
 
     m_webSocket->sendTextMessage(QString::fromUtf8(wireMessage));
-
-    Logger::instance().infoContext(
-        "CoreClient",
-        QString("AA touch WS send queued #%1").arg(m_touchEventSendCount));
 }
 
 auto CoreClient::sendKeyEvent(const QString& keyName, const QString& action, int keyCode) -> void {
@@ -905,7 +912,25 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                     }
                 }
             } else if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
-                if (!m_hasLoggedFirstVideoFrame) {
+                const bool isFirstFrame = !m_hasLoggedFirstVideoFrame;
+
+                // Rate-limit before doing any of the expensive work below.
+                // The core pushes JPEG fallback frames as fast as it produces
+                // them, uncoordinated with how fast the UI can actually
+                // render them; always process the very first frame so video
+                // activates promptly, but otherwise drop frames that arrive
+                // faster than kJpegEmitMinIntervalMs so we don't build a
+                // large data-URL string (and trigger a QML image decode)
+                // for a frame nobody will ever see. This mirrors the
+                // drop=true backpressure the H.264 GStreamer appsink already
+                // gets for free, which the JPEG path otherwise lacks.
+                if (!isFirstFrame && m_lastJpegEmit.isValid() &&
+                    m_lastJpegEmit.elapsed() < kJpegEmitMinIntervalMs) {
+                    return;
+                }
+                m_lastJpegEmit.restart();
+
+                if (isFirstFrame) {
                     m_hasLoggedFirstVideoFrame = true;
                     Logger::instance().infoContext(
                         "CoreClient", "First android-auto/media/video-frame event received",
@@ -915,7 +940,18 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                          {"payload_size", encodedData.size()}});
                 }
 
-                const QString frameUrl = QStringLiteral("data:image/jpeg;base64,%1").arg(encodedData);
+                ++m_jpegEmitCount;
+                if (m_jpegEmitCount == 1 || (m_jpegEmitCount % 30) == 0) {
+                    Logger::instance().infoContext(
+                        "CoreClient", "JPEG fallback frame emission cadence",
+                        {{"count", m_jpegEmitCount},
+                         {"encoded_size", encodedData.size()}});
+                }
+
+                QString frameUrl;
+                frameUrl.reserve(encodedData.size() + 32);
+                frameUrl.append(QStringLiteral("data:image/jpeg;base64,"));
+                frameUrl.append(encodedData);
                 emit videoFrameReceived(frameUrl, width, height);
 
                 if (!m_videoReady) {

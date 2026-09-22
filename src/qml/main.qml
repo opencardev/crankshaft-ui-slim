@@ -37,6 +37,8 @@ ApplicationWindow {
     // 0 means disabled.
     property int aaProjectionFullscreenDelaySeconds: 0
     property bool fullscreenDelayPending: false
+    // Touch diagnostics are disabled by default. Enable with --touch-debug or F12.
+    property bool touchDebugOverlay: _touchDebugEnabled === true || Qt.application.arguments.indexOf("--touch-debug") >= 0
     property int fullscreenCountdownSeconds: 0
     readonly property bool immersiveProjectionMode:
         root.visibility === Window.FullScreen &&
@@ -514,23 +516,23 @@ ApplicationWindow {
                         return Qt.rect(0, 0, 0, 0)
                     }
 
-                    function updateTouchForwarderDisplaySize() {
-                        if (!_touchForwarder) {
-                            return
+                    function projectionFrameSize() {
+                        var width = _androidAutoFacade ? _androidAutoFacade.projectionWidth : 0
+                        var height = _androidAutoFacade ? _androidAutoFacade.projectionHeight : 0
+                        if (width > 0 && height > 0) {
+                            return Qt.size(width, height)
                         }
 
                         var videoRect = videoContentRect()
-                        var mappedWidth = (webRtcActive || h264Selected) && videoRect.width > 0
-                            ? videoRect.width
-                            : (projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width)
-                        var mappedHeight = (webRtcActive || h264Selected) && videoRect.height > 0
-                            ? videoRect.height
-                            : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
-                        _touchForwarder.displaySize = Qt.size(mappedWidth, mappedHeight)
+                        if ((webRtcActive || h264Selected) && videoRect.width > 0 && videoRect.height > 0) {
+                            return Qt.size(Math.round(videoRect.width), Math.round(videoRect.height))
+                        }
 
+                        return Qt.size(Math.round(projectionImage.paintedWidth > 0 ? projectionImage.paintedWidth : projectionImage.width),
+                                       Math.round(projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height))
                     }
 
-                    function mapToProjectionCoordinates(rawX, rawY) {
+                    function projectionFrameRect() {
                         var videoRect = videoContentRect()
                         var frameWidth = (webRtcActive || h264Selected) && videoRect.width > 0
                             ? videoRect.width
@@ -538,22 +540,155 @@ ApplicationWindow {
                         var frameHeight = (webRtcActive || h264Selected) && videoRect.height > 0
                             ? videoRect.height
                             : (projectionImage.paintedHeight > 0 ? projectionImage.paintedHeight : projectionImage.height)
-
                         if (frameWidth <= 0 || frameHeight <= 0) {
-                            return { x: 0, y: 0 }
+                            return Qt.rect(0, 0, 0, 0)
                         }
-
                         var frameLeft = (webRtcActive || h264Selected) && videoRect.width > 0
                             ? videoRect.x
                             : (projectionImage.width - frameWidth) / 2
                         var frameTop = (webRtcActive || h264Selected) && videoRect.height > 0
                             ? videoRect.y
                             : (projectionImage.height - frameHeight) / 2
+                        return Qt.rect(frameLeft, frameTop, frameWidth, frameHeight)
+                    }
 
-                        var localX = Math.max(0, Math.min(frameWidth - 1, rawX - frameLeft))
-                        var localY = Math.max(0, Math.min(frameHeight - 1, rawY - frameTop))
+                    function updateTouchForwarderDisplaySize() {
+                        if (!_touchForwarder) {
+                            return
+                        }
 
-                        return { x: localX, y: localY }
+                        // displaySize is the coordinate space of the projection image,
+                        // not its painted QML size.  TouchEventForwarder scales this
+                        // native projection space to the published AA touch space.
+                        var frameSize = projectionFrameSize()
+                        if (frameSize.width > 0 && frameSize.height > 0) {
+                            _touchForwarder.displaySize = frameSize
+                        }
+                    }
+
+                    function mapToProjectionCoordinates(rawX, rawY) {
+                        var rect = projectionFrameRect()
+                        var nativeSize = projectionFrameSize()
+                        if (rect.width <= 0 || rect.height <= 0 ||
+                            nativeSize.width <= 0 || nativeSize.height <= 0) {
+                            return { x: 0, y: 0 }
+                        }
+
+                        // Stage 1: QML surface -> actual painted video rectangle.
+                        // Stage 2: painted rectangle -> native AA video frame.
+                        var localX = Math.max(0, Math.min(rect.width - 1, rawX - rect.x))
+                        var localY = Math.max(0, Math.min(rect.height - 1, rawY - rect.y))
+                        return {
+                            x: localX * nativeSize.width / rect.width,
+                            y: localY * nativeSize.height / rect.height
+                        }
+                    }
+
+                    function debugAaCoordinates(nativeX, nativeY) {
+                        var nativeSize = projectionFrameSize()
+                        var aa = _touchForwarder ? _touchForwarder.androidAutoSize : Qt.size(0, 0)
+                        if (nativeSize.width <= 0 || nativeSize.height <= 0 ||
+                            aa.width <= 0 || aa.height <= 0) {
+                            return { x: -1, y: -1 }
+                        }
+
+                        return {
+                            x: nativeX * aa.width / nativeSize.width,
+                            y: nativeY * aa.height / nativeSize.height
+                        }
+                    }
+
+                    function debugAaPointInFrame(nativeX, nativeY) {
+                        var nativeSize = projectionFrameSize()
+                        var rect = projectionFrameRect()
+                        if (nativeSize.width <= 0 || nativeSize.height <= 0 ||
+                            rect.width <= 0 || rect.height <= 0) {
+                            return { x: -1, y: -1 }
+                        }
+
+                        return {
+                            x: rect.x + nativeX * rect.width / nativeSize.width,
+                            y: rect.y + nativeY * rect.height / nativeSize.height
+                        }
+                    }
+
+                    function debugAaPointBackInFrame(aaX, aaY) {
+                        var nativeSize = projectionFrameSize()
+                        var aa = _touchForwarder ? _touchForwarder.androidAutoSize : Qt.size(0, 0)
+                        var rect = projectionFrameRect()
+                        if (nativeSize.width <= 0 || nativeSize.height <= 0 ||
+                            aa.width <= 0 || aa.height <= 0 ||
+                            rect.width <= 0 || rect.height <= 0) {
+                            return { x: -1, y: -1 }
+                        }
+
+                        var nativeX = aaX * nativeSize.width / aa.width
+                        var nativeY = aaY * nativeSize.height / aa.height
+                        return {
+                            x: rect.x + nativeX * rect.width / nativeSize.width,
+                            y: rect.y + nativeY * rect.height / nativeSize.height
+                        }
+                    }
+
+                    function debugAaAspectGuide() {
+                        var rect = projectionFrameRect()
+                        var aa = _touchForwarder ? _touchForwarder.androidAutoSize : Qt.size(0, 0)
+                        if (rect.width <= 0 || rect.height <= 0 || aa.width <= 0 || aa.height <= 0) {
+                            return Qt.rect(0, 0, 0, 0)
+                        }
+
+                        // Diagnostic only: shows where a 16:9 AA space would fit
+                        // inside the native frame. It does not alter touch mapping.
+                        var aaAspect = aa.width / aa.height
+                        var frameAspect = rect.width / rect.height
+                        if (frameAspect > aaAspect) {
+                            var guideWidth = rect.height * aaAspect
+                            return Qt.rect(rect.x + (rect.width - guideWidth) / 2,
+                                           rect.y, guideWidth, rect.height)
+                        }
+
+                        var guideHeight = rect.width / aaAspect
+                        return Qt.rect(rect.x,
+                                       rect.y + (rect.height - guideHeight) / 2,
+                                       rect.width, guideHeight)
+                    }
+
+                    property real debugRawX: -1
+                    property real debugRawY: -1
+                    property real debugMappedX: -1
+                    property real debugMappedY: -1
+                    property string debugEventType: ""
+
+                    function updateTouchDebug(rawX, rawY, eventType, mapped) {
+                        if (!root.touchDebugOverlay) {
+                            return
+                        }
+                        // The diagnostic overlay must not turn touch moves into a
+                        // second high-frequency render/logging workload on RPi3.
+                        // Keep press/release/cancel immediate, but sample move updates
+                        // at <=10 Hz.  The actual touch event is still forwarded at full
+                        // rate by TouchEventForwarder.
+                        var nowMs = Date.now()
+                        if (eventType === "move" && (nowMs - debugLastMoveUpdateMs) < 100) {
+                            return
+                        }
+                        debugLastMoveUpdateMs = nowMs
+
+                        debugRawX = rawX
+                        debugRawY = rawY
+                        debugMappedX = mapped.x
+                        debugMappedY = mapped.y
+                        debugEventType = eventType
+
+                        var aa = debugAaCoordinates(mapped.x, mapped.y)
+                        console.log("[TouchDebug] event=" + eventType +
+                                    " raw=" + rawX.toFixed(2) + "," + rawY.toFixed(2) +
+                                    " frameRect=" + projectionFrameRect().x.toFixed(2) + "," +
+                                        projectionFrameRect().y.toFixed(2) + " " +
+                                        projectionFrameRect().width.toFixed(2) + "x" +
+                                        projectionFrameRect().height.toFixed(2) +
+                                    " native=" + mapped.x.toFixed(2) + "," + mapped.y.toFixed(2) +
+                                    " aa=" + aa.x.toFixed(2) + "," + aa.y.toFixed(2))
                     }
 
                     focus: visible
@@ -668,6 +803,13 @@ ApplicationWindow {
                             return
                         }
 
+                        if (event.key === Qt.Key_F12) {
+                            root.touchDebugOverlay = !root.touchDebugOverlay
+                            console.log("[TouchDebug] overlay=" + root.touchDebugOverlay)
+                            event.accepted = true
+                            return
+                        }
+
                         if (forwardKeyboardKey("down", event)) {
                             event.accepted = true
                         }
@@ -732,7 +874,10 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.margins: root.immersiveProjectionMode ? 0 : theme.spacing.small
                         fillMode: Image.PreserveAspectFit
-                        smooth: true
+                        // The fallback image is already decoded to a small AA frame.
+                        // Avoid Qt Quick filtering on the RPi3 render path; this reduces
+                        // GPU work while touch/input and JPEG upload are active.
+                        smooth: false
                         cache: false
                         source: _androidAutoFacade ? _androidAutoFacade.projectionFrameUrl : ""
                         // Decode incoming JPEG fallback frames off the QML GUI thread
@@ -791,6 +936,7 @@ ApplicationWindow {
                             for (var i = 0; i < touchPoints.length; i++) {
                                 var tp = touchPoints[i]
                                 var mapped = projectionSurface.mapToProjectionCoordinates(tp.x, tp.y)
+                                projectionSurface.updateTouchDebug(tp.x, tp.y, eventType, mapped)
                                 points.push({
                                     id: tp.pointId,
                                     x: mapped.x,
@@ -805,6 +951,198 @@ ApplicationWindow {
                         }
                     }
 
+                    Rectangle {
+                        id: touchDebugOverlay
+                        anchors.fill: parent
+                        z: 1000
+                        visible: root.touchDebugOverlay
+                        color: "transparent"
+                        border.color: "#ffcc00"
+                        border.width: 2
+                        opacity: 0.95
+                        // Diagnostic only: never consume touch/mouse input.
+                        enabled: false
+
+                        Rectangle {
+                            id: touchDebugPanel
+                            x: 8
+                            y: 8
+                            width: Math.min(parent.width - 16, 520)
+                            height: 184
+                            color: "#cc101010"
+                            radius: 4
+
+                            Text {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                color: "white"
+                                font.pixelSize: 12
+                                text: {
+                                    var frameSize = projectionSurface.projectionFrameSize()
+                                    var rect = projectionSurface.projectionFrameRect()
+                                    var aa = _touchForwarder ? _touchForwarder.androidAutoSize : Qt.size(0, 0)
+                                    var display = _touchForwarder ? _touchForwarder.displaySize : Qt.size(0, 0)
+                                    var sx = display.width > 0 ? aa.width / display.width : 0
+                                    var sy = display.height > 0 ? aa.height / display.height : 0
+                                    var aaPoint = projectionSurface.debugAaCoordinates(
+                                                projectionSurface.debugMappedX,
+                                                projectionSurface.debugMappedY)
+                                    var aaFramePoint = projectionSurface.debugAaPointInFrame(
+                                                projectionSurface.debugMappedX,
+                                                projectionSurface.debugMappedY)
+                                    var guide = projectionSurface.debugAaAspectGuide()
+                                    return "TOUCH DEBUG  [F12 toggles]
+" +
+                                           "surface: " + Math.round(projectionSurface.width) + "x" +
+                                               Math.round(projectionSurface.height) +
+                                           "  frameRect: " + Math.round(rect.x) + "," + Math.round(rect.y) +
+                                               " " + Math.round(rect.width) + "x" + Math.round(rect.height) + "
+" +
+                                           "native frame: " + frameSize.width + "x" + frameSize.height +
+                                           "  AA: " + aa.width + "x" + aa.height + "
+" +
+                                           "display/native: " + display.width + "x" + display.height +
+                                           "  scale: " + sx.toFixed(3) + "x" + sy.toFixed(3) + "
+" +
+                                           "event: " + projectionSurface.debugEventType +
+                                           "  raw=" + projectionSurface.debugRawX.toFixed(1) + "," +
+                                               projectionSurface.debugRawY.toFixed(1) + "
+" +
+                                           "native=" + projectionSurface.debugMappedX.toFixed(1) + "," +
+                                               projectionSurface.debugMappedY.toFixed(1) +
+                                           "  AA=" + aaPoint.x.toFixed(1) + "," + aaPoint.y.toFixed(1) + "
+" +
+                                           "AA point in frame=" + aaFramePoint.x.toFixed(1) + "," +
+                                               aaFramePoint.y.toFixed(1) +
+                                           "  16:9 guide=" + Math.round(guide.x) + "," + Math.round(guide.y) +
+                                               " " + Math.round(guide.width) + "x" + Math.round(guide.height)
+                                }
+                            }
+                        }
+
+                        // Green = actual painted projection frame.
+                        Rectangle {
+                            id: touchDebugFrame
+                            x: projectionSurface.projectionFrameRect().x
+                            y: projectionSurface.projectionFrameRect().y
+                            width: projectionSurface.projectionFrameRect().width
+                            height: projectionSurface.projectionFrameRect().height
+                            color: "transparent"
+                            border.color: "#00ff66"
+                            border.width: 2
+                        }
+
+                        // Blue = diagnostic 16:9 AA aspect-fit guide inside the native
+                        // frame. This is deliberately visual-only; it does not affect
+                        // the touch transform.
+                        Rectangle {
+                            id: touchDebugAaGuide
+                            x: projectionSurface.debugAaAspectGuide().x
+                            y: projectionSurface.debugAaAspectGuide().y
+                            width: projectionSurface.debugAaAspectGuide().width
+                            height: projectionSurface.debugAaAspectGuide().height
+                            color: "transparent"
+                            border.color: "#38a8ff"
+                            border.width: 2
+                        }
+
+                        // Thin centre lines make it easy to identify any unexpected
+                        // crop/offset independently of the touch marker.
+                        Rectangle {
+                            x: touchDebugFrame.x + touchDebugFrame.width / 2 - 1
+                            y: touchDebugFrame.y
+                            width: 2
+                            height: touchDebugFrame.height
+                            color: "#66ffffff"
+                        }
+                        Rectangle {
+                            x: touchDebugFrame.x
+                            y: touchDebugFrame.y + touchDebugFrame.height / 2 - 1
+                            width: touchDebugFrame.width
+                            height: 2
+                            color: "#66ffffff"
+                        }
+
+                        // Red = raw QML event position.
+                        Rectangle {
+                            visible: projectionSurface.debugRawX >= 0 && projectionSurface.debugRawY >= 0
+                            width: 18
+                            height: 18
+                            radius: 9
+                            x: projectionSurface.debugRawX - width / 2
+                            y: projectionSurface.debugRawY - height / 2
+                            color: "#ff3030"
+                            border.color: "white"
+                            border.width: 2
+                        }
+
+                        // Yellow = native-frame coordinate after removing the painted
+                        // frame's offset/letterbox.
+                        Rectangle {
+                            property point p: projectionSurface.debugAaPointInFrame(
+                                                 projectionSurface.debugMappedX,
+                                                 projectionSurface.debugMappedY)
+                            visible: p.x >= 0 && p.y >= 0
+                            width: 14
+                            height: 14
+                            radius: 7
+                            x: p.x - width / 2
+                            y: p.y - height / 2
+                            color: "#ffd400"
+                            border.color: "black"
+                            border.width: 2
+                        }
+
+                        // Cyan = final AA coordinate projected back into the native
+                        // frame. If yellow and cyan separate, the native->AA transform
+                        // is introducing an unexpected geometry change.
+                        Rectangle {
+                            property var aaPoint: projectionSurface.debugAaCoordinates(
+                                                       projectionSurface.debugMappedX,
+                                                       projectionSurface.debugMappedY)
+                            property point p: projectionSurface.debugAaPointBackInFrame(
+                                                 aaPoint.x, aaPoint.y)
+                            visible: aaPoint.x >= 0 && aaPoint.y >= 0 && p.x >= 0 && p.y >= 0
+                            width: 10
+                            height: 10
+                            radius: 5
+                            x: p.x - width / 2
+                            y: p.y - height / 2
+                            color: "#00e5ff"
+                            border.color: "black"
+                            border.width: 1
+                        }
+
+                        // Labels for the diagnostic points.
+                        Text {
+                            visible: projectionSurface.debugRawX >= 0
+                            x: projectionSurface.debugRawX + 10
+                            y: projectionSurface.debugRawY - 18
+                            color: "#ff6060"
+                            font.pixelSize: 11
+                            text: "RAW"
+                        }
+                        Text {
+                            visible: projectionSurface.debugMappedX >= 0
+                            property point p: projectionSurface.debugAaPointInFrame(
+                                                 projectionSurface.debugMappedX,
+                                                 projectionSurface.debugMappedY)
+                            x: p.x + 10
+                            y: p.y - 14
+                            color: "#ffe000"
+                            font.pixelSize: 11
+                            text: "NATIVE"
+                        }
+
+                        Text {
+                            x: touchDebugFrame.x + 6
+                            y: touchDebugFrame.y + touchDebugFrame.height - 20
+                            color: "#00e5ff"
+                            font.pixelSize: 11
+                            text: "AA coordinate guide / final transform"
+                        }
+                    }
+
                     MouseArea {
                         anchors.fill: parent
                         enabled: !projectionTouchArea.enabled
@@ -815,6 +1153,7 @@ ApplicationWindow {
                             isPressed = true
                             if (_touchForwarder) {
                                 var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                projectionSurface.updateTouchDebug(mouse.x, mouse.y, "press", mapped)
                                 _touchForwarder.forwardMouseEvent("press", mapped.x, mapped.y)
                             }
                         }
@@ -822,6 +1161,7 @@ ApplicationWindow {
                         onPositionChanged: (mouse) => {
                             if (isPressed && _touchForwarder) {
                                 var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                projectionSurface.updateTouchDebug(mouse.x, mouse.y, "move", mapped)
                                 _touchForwarder.forwardMouseEvent("move", mapped.x, mapped.y)
                             }
                         }
@@ -830,6 +1170,7 @@ ApplicationWindow {
                             isPressed = false
                             if (_touchForwarder) {
                                 var mapped = projectionSurface.mapToProjectionCoordinates(mouse.x, mouse.y)
+                                projectionSurface.updateTouchDebug(mouse.x, mouse.y, "release", mapped)
                                 _touchForwarder.forwardMouseEvent("release", mapped.x, mapped.y)
                             }
                         }

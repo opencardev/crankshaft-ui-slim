@@ -38,6 +38,8 @@ private:
     static auto onBusMessage(GstBus* bus, GstMessage* message, gpointer userData) -> gboolean;
 
     auto initialise() -> bool;
+    auto buildPipeline(const char* decoderElementName, bool isHardwareDecoder) -> bool;
+    auto teardownPipeline() -> void;
     auto shutdown() -> void;
     auto handleSample(GstSample* sample) -> GstFlowReturn;
     auto handleError(GError* error, const gchar* debug) -> void;
@@ -50,6 +52,16 @@ private:
     GstElement* m_appsink{nullptr};
     GstBus* m_bus{nullptr};
     bool m_initialised{false};
+    // True when m_decodebin is a hardware-accelerated V4L2 stateful decoder
+    // (v4l2h264dec, backed by the Pi's VideoCore/HEVC decode block) rather
+    // than the avdec_h264 software fallback. Logged for diagnostics and used
+    // to decide whether a pipeline failure should retry with software decode.
+    bool m_usingHardwareDecoder{false};
+    // Set once a hardware-decoder attempt has failed (either at element
+    // creation or at PLAYING state-change time) so we don't repeatedly retry
+    // a decoder we already know is unusable on this device every time the
+    // pipeline is rebuilt (e.g. on reconnect).
+    bool m_hardwareDecoderUnavailable{false};
     int m_width{0};
     int m_height{0};
     quint64 m_pushedFrameCount{0};
