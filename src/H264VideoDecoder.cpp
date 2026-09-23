@@ -19,6 +19,7 @@
 #include <QVideoFrameFormat>
 
 #include <cstring>
+#include <algorithm>
 
 #include "Logger.h"
 
@@ -77,20 +78,21 @@ auto H264VideoDecoder::detectHardwareDecoder(QString* decoderName, QString* plat
     // bcm2835-codec). Prefer whichever is the more modern/capable one for
     // the detected board, but still accept the other if that's what the
     // running kernel/GStreamer stack actually provides.
-    QStringList candidates;
-    if (model.contains(QStringLiteral("Raspberry Pi 5"), Qt::CaseInsensitive)) {
-        candidates = {QStringLiteral("v4l2slh264dec"), QStringLiteral("v4l2h264dec")};
-    } else {
-        candidates = {QStringLiteral("v4l2h264dec"), QStringLiteral("v4l2slh264dec")};
+    const QStringList candidates =
+        model.contains(QStringLiteral("Raspberry Pi 5"), Qt::CaseInsensitive)
+            ? QStringList{QStringLiteral("v4l2slh264dec"), QStringLiteral("v4l2h264dec")}
+            : QStringList{QStringLiteral("v4l2h264dec"), QStringLiteral("v4l2slh264dec")};
+
+    const auto it = std::find_if(candidates.cbegin(), candidates.cend(), [](const QString& candidate) {
+        return gstElementFactoryExists(candidate.toUtf8().constData());
+    });
+
+    if (it == candidates.cend()) {
+        return false;
     }
 
-    for (const QString& candidate : candidates) {
-        if (gstElementFactoryExists(candidate.toUtf8().constData())) {
-            if (decoderName) *decoderName = candidate;
-            return true;
-        }
-    }
-    return false;
+    if (decoderName) *decoderName = *it;
+    return true;
 }
 
 auto H264VideoDecoder::selectDecoderName(QString* platformModel, QString* selectionMode) -> QString {
