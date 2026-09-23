@@ -24,12 +24,32 @@
 #include "ServiceProvider.h"
 
 #include <memory>
+#include <QFile>
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QThread>
 
 namespace {
 constexpr int kProjectionFrameIntervalMs = 33;
+constexpr int kLowPowerProjectionFrameIntervalMs = 67;
+
+int projectionFrameIntervalMs() {
+    bool ok = false;
+    const int requestedFps = qEnvironmentVariable("SLIM_UI_PROJECTION_FPS").toInt(&ok);
+    if (ok && requestedFps > 0 && requestedFps <= 60) {
+        return qMax(1, 1000 / requestedFps);
+    }
+
+    QFile modelFile(QStringLiteral("/proc/device-tree/model"));
+    if (modelFile.open(QIODevice::ReadOnly)) {
+        const QByteArray model = modelFile.readAll();
+        if (model.contains("Raspberry Pi 3")) {
+            return kLowPowerProjectionFrameIntervalMs;
+        }
+    }
+
+    return kProjectionFrameIntervalMs;
+}
 }
 
 AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* parent)
@@ -56,7 +76,12 @@ AndroidAutoFacade::AndroidAutoFacade(ServiceProvider* serviceProvider, QObject* 
         connect(&m_videoInactiveDebounceTimer, &QTimer::timeout, this,
             &AndroidAutoFacade::onVideoInactiveDebounceTimeout);
 
-        m_projectionFrameIntervalMs = kProjectionFrameIntervalMs;
+        m_projectionFrameIntervalMs = projectionFrameIntervalMs();
+        Logger::instance().infoContext(
+            "AndroidAutoFacade",
+            QString("JPEG fallback projection cadence: %1 fps (%2 ms interval)")
+                .arg(1000.0 / static_cast<double>(m_projectionFrameIntervalMs), 0, 'f', 1)
+                .arg(m_projectionFrameIntervalMs));
         m_projectionFrameDispatchTimer.setSingleShot(true);
         connect(&m_projectionFrameDispatchTimer, &QTimer::timeout, this,
             &AndroidAutoFacade::onProjectionFrameDispatchTimeout);

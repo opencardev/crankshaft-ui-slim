@@ -422,25 +422,32 @@ auto CoreClient::sendTouchEvent(const QString& eventType, const QVariantList& po
         QJsonDocument(touchMessage).toJson(QJsonDocument::Compact);
 
     ++m_touchEventSendCount;
-    Logger::instance().infoContext(
-        "CoreClient",
-        QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
-                "points=%7 bytes=%8 socketState=%9")
-            .arg(m_touchEventSendCount)
-            .arg(eventType)
-            .arg(x, 0, 'f', 2)
-            .arg(y, 0, 'f', 2)
-            .arg(pointerId)
-            .arg(pressure, 0, 'f', 2)
-            .arg(points.size())
-            .arg(wireMessage.size())
-            .arg(static_cast<int>(m_webSocket->state())));
+
+    // Touch move events can arrive at 60+ Hz.  Logging every move synchronously
+    // on the UI thread can starve Qt Quick input/rendering on low-power devices
+    // such as Raspberry Pi 3.  Keep press/release/cancel at info level and make
+    // move diagnostics debug-only and periodic.
+    const bool logTouchEvent = eventType != QStringLiteral("move");
+    if (logTouchEvent) {
+        Logger::instance().infoContext(
+            "CoreClient",
+            QString("AA touch WS send #%1: event=%2 x=%3 y=%4 pointerId=%5 pressure=%6 "
+                    "points=%7 bytes=%8")
+                .arg(m_touchEventSendCount)
+                .arg(eventType)
+                .arg(x, 0, 'f', 2)
+                .arg(y, 0, 'f', 2)
+                .arg(pointerId)
+                .arg(pressure, 0, 'f', 2)
+                .arg(points.size())
+                .arg(wireMessage.size()));
+    } else if ((m_touchEventSendCount % 60) == 0) {
+        Logger::instance().debugContext(
+            "CoreClient",
+            QString("AA touch move traffic: %1 sends").arg(m_touchEventSendCount));
+    }
 
     m_webSocket->sendTextMessage(QString::fromUtf8(wireMessage));
-
-    Logger::instance().infoContext(
-        "CoreClient",
-        QString("AA touch WS send queued #%1").arg(m_touchEventSendCount));
 }
 
 auto CoreClient::sendKeyEvent(const QString& keyName, const QString& action, int keyCode) -> void {
@@ -915,7 +922,28 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                          {"payload_size", encodedData.size()}});
                 }
 
-                const QString frameUrl = QStringLiteral("data:image/jpeg;base64,%1").arg(encodedData);
+                ++m_jpegEmitCount;
+                if (m_jpegEmitCount == 1 || (m_jpegEmitCount % 30) == 0) {
+                    Logger::instance().infoContext(
+                        "CoreClient", "JPEG fallback frame emission cadence",
+                        {{"count", m_jpegEmitCount},
+                         {"encoded_size", encodedData.size()}});
+                }
+
+                // CoreClient forwards every arriving frame 1:1 via
+                // videoFrameReceived (relied on by callers/tests); it does
+                // not drop frames itself. Building the "data:" URL with
+                // reserve()+append() instead of QString::arg() avoids
+                // arg()'s placeholder-scanning overhead on what's often a
+                // large payload, without changing that per-frame contract.
+                // Actual frame-rate backpressure for slower hardware
+                // belongs downstream, in whatever actually renders these
+                // frames (AndroidAutoFacade already coalesces to a single
+                // pending frame on its own dispatch timer).
+                QString frameUrl;
+                frameUrl.reserve(encodedData.size() + 32);
+                frameUrl.append(QStringLiteral("data:image/jpeg;base64,"));
+                frameUrl.append(encodedData);
                 emit videoFrameReceived(frameUrl, width, height);
 
                 if (!m_videoReady) {

@@ -41,10 +41,21 @@ Environment="XDG_DATA_HOME=/var/lib/crankshaft/slim-ui/.local/share"
 Environment="XDG_STATE_HOME=/var/lib/crankshaft/slim-ui/.local/state"
 Environment="XDG_CACHE_HOME=/var/cache/crankshaft"
 
-# Environment for Qt platform (EGLFS for physical display, VNC for remote)
-Environment="QT_QPA_PLATFORM=eglfs"
-Environment="QT_QPA_EGLFS_INTEGRATION=eglfs_kms"
-Environment="QT_QPA_EGLFS_ALWAYS_SET_MODE=1"
+# Environment for Qt platform (EGLFS for physical display, VNC for remote).
+# QT_QPA_PLATFORM / QT_QPA_EGLFS_INTEGRATION / QT_QPA_EGLFS_ALWAYS_SET_MODE are
+# decided per-boot by crankshaft-ui-slim-display-setup.service based on
+# whether a DRM connector reports "connected", and written to the
+# EnvironmentFile above. They must NOT also be hardcoded here: this unit
+# previously set them a second time below, which meant this static value
+# always won over whatever the display-setup script actually decided,
+# silently defeating VNC fallback detection and forcing eglfs even on boards
+# where no display was detected (or vice versa, depending on systemd's
+# environment merge order) - on affected hardware this made AndroidAuto
+# video (and the rest of the UI) render into a mode nobody could see, while
+# every lower-level part of the pipeline looked perfectly healthy.
+# crankshaft-ui-slim-display-setup.service is a hard Requires= of this unit
+# and unconditionally writes one branch or the other, so no fallback default
+# is needed here.
 
 # Debug output (set to 1 for verbose logging)
 Environment="SLIM_UI_DEBUG=0"

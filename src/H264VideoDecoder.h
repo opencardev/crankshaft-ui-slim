@@ -38,9 +38,22 @@ private:
     static auto onBusMessage(GstBus* bus, GstMessage* message, gpointer userData) -> gboolean;
 
     auto initialise() -> bool;
+    auto buildPipeline(const char* decoderElementName, bool isHardwareDecoder) -> bool;
+    auto teardownPipeline() -> void;
     auto shutdown() -> void;
     auto handleSample(GstSample* sample) -> GstFlowReturn;
     auto handleError(GError* error, const gchar* debug) -> void;
+    // Probes for a usable hardware-accelerated V4L2 decoder element, trying
+    // candidates in an order appropriate to the detected board (e.g. Pi5's
+    // newer stateless decoder before the older stateful one). Always fills
+    // *platformModel with the /proc/device-tree/model contents (or an empty
+    // string off-Pi) for diagnostics, even when no candidate is found.
+    static auto detectHardwareDecoder(QString* decoderName, QString* platformModel) -> bool;
+    // Combines the SLIM_UI_H264_DECODER override, per-board hardware
+    // availability, and known board-specific caveats into the GStreamer
+    // decoder element name that should be used. *platformModel and
+    // *selectionMode are filled for logging.
+    static auto selectDecoderName(QString* platformModel, QString* selectionMode) -> QString;
 
     GstElement* m_pipeline{nullptr};
     GstElement* m_appsrc{nullptr};
@@ -50,6 +63,22 @@ private:
     GstElement* m_appsink{nullptr};
     GstBus* m_bus{nullptr};
     bool m_initialised{false};
+    // True when m_decodebin is a hardware-accelerated V4L2 stateful decoder
+    // (v4l2h264dec, backed by the Pi's VideoCore/HEVC decode block) rather
+    // than the avdec_h264 software fallback. Logged for diagnostics and used
+    // to decide whether a pipeline failure should retry with software decode.
+    bool m_usingHardwareDecoder{false};
+    // Set once a hardware-decoder attempt has failed (either at element
+    // creation or at PLAYING state-change time) so we don't repeatedly retry
+    // a decoder we already know is unusable on this device every time the
+    // pipeline is rebuilt (e.g. on reconnect).
+    bool m_hardwareDecoderUnavailable{false};
+    // GStreamer element name actually selected/in-use, the raw
+    // /proc/device-tree/model string, and the resolved SLIM_UI_H264_DECODER
+    // mode ("software"/"hardware"/"auto") - kept for diagnostics/logging.
+    QString m_decoderName;
+    QString m_platformModel;
+    QString m_decoderSelectionMode;
     int m_width{0};
     int m_height{0};
     quint64 m_pushedFrameCount{0};

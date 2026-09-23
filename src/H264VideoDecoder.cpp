@@ -13,21 +13,51 @@
 #include <gst/video/video.h>
 
 #include <QMutexLocker>
+#include <QFile>
 #include <QElapsedTimer>
+#include <QStringList>
 #include <QVideoFrameFormat>
 
 #include <cstring>
+#include <algorithm>
 
 #include "Logger.h"
 
 namespace {
 constexpr guint kMaxBuffers = 2;
+constexpr const char* kSoftwareDecoderElementName = "avdec_h264";
 
 [[nodiscard]] qint64 monotonicNs() {
     static QElapsedTimer timer;
     static const bool started = (timer.start(), true);
     Q_UNUSED(started);
     return timer.nsecsElapsed();
+}
+
+[[nodiscard]] QString readPlatformModel() {
+    QFile modelFile(QStringLiteral("/proc/device-tree/model"));
+    if (!modelFile.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return QString::fromUtf8(modelFile.readAll()).trimmed();
+}
+
+[[nodiscard]] QString requestedDecoderMode() {
+    const QString value = qEnvironmentVariable("SLIM_UI_H264_DECODER").trimmed().toLower();
+    if (value == QStringLiteral("software") || value == QStringLiteral("hardware") ||
+        value == QStringLiteral("auto")) {
+        return value;
+    }
+    return QStringLiteral("auto");
+}
+
+[[nodiscard]] bool gstElementFactoryExists(const char* factoryName) {
+    GstElementFactory* factory = gst_element_factory_find(factoryName);
+    if (!factory) {
+        return false;
+    }
+    gst_object_unref(factory);
+    return true;
 }
 }
 
@@ -39,15 +69,118 @@ H264VideoDecoder::~H264VideoDecoder() {
     shutdown();
 }
 
+auto H264VideoDecoder::detectHardwareDecoder(QString* decoderName, QString* platformModel) -> bool {
+    const QString model = readPlatformModel();
+    if (platformModel) *platformModel = model;
+
+    // Different boards expose different V4L2 stateful/stateless H.264
+    // decoder elements (backed by the VideoCore/HEVC decode block via
+    // bcm2835-codec). Prefer whichever is the more modern/capable one for
+    // the detected board, but still accept the other if that's what the
+    // running kernel/GStreamer stack actually provides.
+    const QStringList candidates =
+        model.contains(QStringLiteral("Raspberry Pi 5"), Qt::CaseInsensitive)
+            ? QStringList{QStringLiteral("v4l2slh264dec"), QStringLiteral("v4l2h264dec")}
+            : QStringList{QStringLiteral("v4l2h264dec"), QStringLiteral("v4l2slh264dec")};
+
+    const auto it = std::find_if(candidates.cbegin(), candidates.cend(), [](const QString& candidate) {
+        return gstElementFactoryExists(candidate.toUtf8().constData());
+    });
+
+    if (it == candidates.cend()) {
+        return false;
+    }
+
+    if (decoderName) *decoderName = *it;
+    return true;
+}
+
+auto H264VideoDecoder::selectDecoderName(QString* platformModel, QString* selectionMode) -> QString {
+    const QString requested = requestedDecoderMode();
+    if (selectionMode) *selectionMode = requested;
+
+    const QString model = readPlatformModel();
+    if (platformModel) *platformModel = model;
+
+    if (requested == QStringLiteral("software")) {
+        return QLatin1String(kSoftwareDecoderElementName);
+    }
+
+    // Raspberry Pi 3 commonly exposes the legacy VideoCore H.264 path rather
+    // than a fully usable V4L2 stateful/stateless decoder: the element can
+    // reach PLAYING but never actually produce a decoded sample, which a
+    // simple "did the pipeline start" check can't catch. Don't select it
+    // there in "auto" mode; SLIM_UI_H264_DECODER=hardware can still force it
+    // for a board/kernel combination that's known to work.
+    if (requested == QStringLiteral("auto") &&
+        model.contains(QStringLiteral("Raspberry Pi 3"), Qt::CaseInsensitive)) {
+        return QLatin1String(kSoftwareDecoderElementName);
+    }
+
+    QString hardwareName;
+    const bool hardwareAvailable = detectHardwareDecoder(&hardwareName, platformModel);
+    if (hardwareAvailable) {
+        return hardwareName;
+    }
+
+    if (requested == QStringLiteral("hardware")) {
+        Logger::instance().infoContext(
+            "H264VideoDecoder",
+            "Hardware H.264 decoder requested but no supported V4L2 decoder is available; "
+            "falling back to software");
+    }
+    return QLatin1String(kSoftwareDecoderElementName);
+}
+
 auto H264VideoDecoder::initialise() -> bool {
     if (m_initialised) return true;
 
-    Logger::instance().infoContext("H264VideoDecoder", "Initialising GStreamer H.264 pipeline");
+    const QString decoderName = selectDecoderName(&m_platformModel, &m_decoderSelectionMode);
+    const bool wantsHardware = (decoderName != QLatin1String(kSoftwareDecoderElementName));
+
+    Logger::instance().infoContext(
+        "H264VideoDecoder", "H.264 decoder selection",
+        {{"mode", m_decoderSelectionMode},
+         {"decoder", decoderName},
+         {"hardware_accelerated", wantsHardware},
+         {"platform_model", m_platformModel}});
+
+    // Prefer the hardware decoder unless it was ruled out above, or we've
+    // already established on this run that it isn't usable (missing plugin,
+    // or a previous PLAYING attempt failed) - this avoids re-probing and
+    // re-failing it on every reconnect once we know software is the only
+    // option.
+    if (wantsHardware && !m_hardwareDecoderUnavailable) {
+        m_decoderName = decoderName;
+        Logger::instance().infoContext(
+            "H264VideoDecoder", "Attempting hardware-accelerated H.264 decode",
+            {{"decoder", m_decoderName}});
+        if (buildPipeline(m_decoderName.toUtf8().constData(), /*isHardwareDecoder=*/true)) {
+            return true;
+        }
+
+        Logger::instance().warningContext(
+            "H264VideoDecoder",
+            "Hardware decoder unavailable or failed to start; falling back to software decode",
+            {{"decoder", m_decoderName}});
+        m_hardwareDecoderUnavailable = true;
+    }
+
+    m_decoderName = QLatin1String(kSoftwareDecoderElementName);
+    Logger::instance().infoContext(
+        "H264VideoDecoder", "Using software H.264 decode",
+        {{"decoder", m_decoderName}});
+    return buildPipeline(kSoftwareDecoderElementName, /*isHardwareDecoder=*/false);
+}
+
+auto H264VideoDecoder::buildPipeline(const char* decoderElementName, bool isHardwareDecoder) -> bool {
+    Logger::instance().infoContext("H264VideoDecoder", "Initialising GStreamer H.264 pipeline",
+                                    {{"decoder", decoderElementName}});
 
     m_pipeline = gst_pipeline_new("crankshaft-h264-decoder");
     m_appsrc = gst_element_factory_make("appsrc", "h264-source");
     m_h264parse = gst_element_factory_make("h264parse", "h264-parse");
-    m_decodebin = gst_element_factory_make("avdec_h264", "h264-decoder");
+    m_decodebin = gst_element_factory_make(decoderElementName, "h264-decoder");
     m_videoconvert = gst_element_factory_make("videoconvert", "video-convert");
     m_appsink = gst_element_factory_make("appsink", "video-sink");
 
@@ -55,15 +188,19 @@ auto H264VideoDecoder::initialise() -> bool {
         !m_videoconvert || !m_appsink) {
         Logger::instance().errorContext(
             "H264VideoDecoder", "Required GStreamer H.264 elements are unavailable",
-            {{"pipeline", m_pipeline != nullptr},
+            {{"decoder", decoderElementName},
+             {"pipeline", m_pipeline != nullptr},
              {"appsrc", m_appsrc != nullptr},
              {"h264parse", m_h264parse != nullptr},
-             {"decoder", m_decodebin != nullptr},
+             {"decoder_element", m_decodebin != nullptr},
              {"videoconvert", m_videoconvert != nullptr},
-             {"appsink", m_appsink != nullptr}});
-        // cppcheck-suppress shadowFunction
-        emit errorOccurred(QStringLiteral("Required GStreamer H.264 elements are unavailable"));
-        shutdown();
+             {"appsink", m_appsink != nullptr},
+             {"platform_model", m_platformModel}});
+        if (!isHardwareDecoder) {
+            // cppcheck-suppress shadowFunction
+            emit errorOccurred(QStringLiteral("Required GStreamer H.264 elements are unavailable"));
+        }
+        teardownPipeline();
         return false;
     }
 
@@ -101,10 +238,13 @@ auto H264VideoDecoder::initialise() -> bool {
 
     if (!gst_element_link_many(m_appsrc, m_h264parse, m_decodebin, m_videoconvert,
                                m_appsink, nullptr)) {
-        Logger::instance().errorContext("H264VideoDecoder", "Failed to link GStreamer H.264 pipeline");
-        // cppcheck-suppress shadowFunction
-        emit errorOccurred(QStringLiteral("Failed to link GStreamer H.264 pipeline"));
-        shutdown();
+        Logger::instance().errorContext("H264VideoDecoder", "Failed to link GStreamer H.264 pipeline",
+                                         {{"decoder", decoderElementName}});
+        if (!isHardwareDecoder) {
+            // cppcheck-suppress shadowFunction
+            emit errorOccurred(QStringLiteral("Failed to link GStreamer H.264 pipeline"));
+        }
+        teardownPipeline();
         return false;
     }
 
@@ -131,18 +271,24 @@ auto H264VideoDecoder::initialise() -> bool {
     g_signal_connect(m_bus, "message", G_CALLBACK(onBusMessage), this);
 
     if (gst_element_set_state(m_pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-        Logger::instance().errorContext("H264VideoDecoder", "Failed to set GStreamer pipeline to PLAYING");
-        // cppcheck-suppress shadowFunction
-        emit errorOccurred(QStringLiteral("Failed to start GStreamer H.264 pipeline"));
-        shutdown();
+        Logger::instance().errorContext("H264VideoDecoder", "Failed to set GStreamer pipeline to PLAYING",
+                                         {{"decoder", decoderElementName}});
+        if (!isHardwareDecoder) {
+            // cppcheck-suppress shadowFunction
+            emit errorOccurred(QStringLiteral("Failed to start GStreamer H.264 pipeline"));
+        }
+        teardownPipeline();
         return false;
     }
 
+    m_usingHardwareDecoder = isHardwareDecoder;
     m_initialised = true;
     Logger::instance().infoContext(
         "H264VideoDecoder", "GStreamer H.264 pipeline is PLAYING",
         {{"input_caps", "video/x-h264,stream-format=byte-stream,alignment=nal"},
-         {"decoder", "avdec_h264"},
+         {"decoder", decoderElementName},
+         {"hardware_accelerated", isHardwareDecoder},
+         {"platform_model", m_platformModel},
          {"output_caps", "video/x-raw,format=BGRA"}});
     return true;
 }
@@ -464,7 +610,7 @@ auto H264VideoDecoder::stop() -> void {
     if (m_pipeline) gst_element_set_state(m_pipeline, GST_STATE_NULL);
 }
 
-auto H264VideoDecoder::shutdown() -> void {
+auto H264VideoDecoder::teardownPipeline() -> void {
     if (m_pipeline) gst_element_set_state(m_pipeline, GST_STATE_NULL);
     if (m_bus) {
         gst_bus_remove_signal_watch(m_bus);
@@ -480,5 +626,13 @@ auto H264VideoDecoder::shutdown() -> void {
     m_decodebin = nullptr;
     m_videoconvert = nullptr;
     m_appsink = nullptr;
+}
+
+auto H264VideoDecoder::shutdown() -> void {
+    teardownPipeline();
+    // Deliberately leave m_hardwareDecoderUnavailable untouched: once we've
+    // learned the hardware decoder can't be used on this device, keep using
+    // software decode on every subsequent reconnect rather than re-probing
+    // (and re-failing) it each time.
     m_initialised = false;
 }

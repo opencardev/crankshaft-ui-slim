@@ -136,6 +136,10 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
                                    "Enable debug logging (same as SLIM_UI_DEBUG=1)");
     parser.addOption(debugOption);
 
+    QCommandLineOption touchDebugOption(QStringList() << "touch-debug",
+                                        "Enable the AA touch-coordinate diagnostic overlay (toggle with F12)");
+    parser.addOption(touchDebugOption);
+
     QCommandLineOption platformOption(QStringList() << "p" << "platform",
                                       "Qt platform plugin (e.g., eglfs, vnc:port=5900, xcb)",
                                       "platform");
@@ -158,6 +162,8 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
     Logger::instance().setLogFile(logFilePath);
 
     bool debugMode = parser.isSet(debugOption) || qEnvironmentVariableIsSet("SLIM_UI_DEBUG");
+    const bool touchDebugMode = parser.isSet(touchDebugOption) ||
+                                qEnvironmentVariableIsSet("SLIM_UI_TOUCH_DEBUG");
 
     if (debugMode || logLevel == "debug") {
         Logger::instance().setLevel(Logger::Level::Debug);
@@ -226,6 +232,13 @@ int runSlimUiApplication(int argc, char* argv[], const QString& version) {
         engine.rootContext()->setContextProperty("_connectionStateMachine", &connectionStateMachine);
         engine.rootContext()->setContextProperty("_preferencesFacade", &preferencesFacade);
         engine.rootContext()->setContextProperty("_errorHandler", &errorHandler);
+        engine.rootContext()->setContextProperty("_touchDebugEnabled", touchDebugMode);
+
+        if (touchDebugMode) {
+            Logger::instance().infoContext(
+                "Main",
+                "Touch debug overlay enabled (toggle with F12)");
+        }
 
         const QUrl url(QStringLiteral("qrc:/qml/main.qml"));
 
