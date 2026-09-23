@@ -115,17 +115,10 @@ private:
     quint64 m_h264EmitCount = 0;
     QElapsedTimer m_lastH264EventArrival;
     QElapsedTimer m_lastH264Emit;
-    // JPEG fallback frames arrive at whatever rate the core happens to push
-    // them, which is not coordinated with the UI's own render throttle
-    // downstream in AndroidAutoFacade. Building the base64 data-URL string
-    // for every arriving frame regardless of whether it will actually be
-    // rendered is expensive (large QString allocation/copy) and, on a
-    // Raspberry Pi 3, arriving fast enough can exhaust CPU/memory and crash
-    // the UI. Drop excess frames here, before doing that work, rather than
-    // only after it downstream.
+    // JPEG fallback frames are forwarded 1:1 via videoFrameReceived (relied
+    // on by callers/tests); m_jpegEmitCount is only used for periodic
+    // cadence logging, not for rate-limiting.
     quint64 m_jpegEmitCount = 0;
-    QElapsedTimer m_lastJpegEmit;
-    static constexpr int kJpegEmitMinIntervalMs = 33;  // ~30 fps cap
     quint64 m_touchEventSendCount = 0;
     bool m_projectionReady = false;
     bool m_videoReady = false;

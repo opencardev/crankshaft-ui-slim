@@ -912,25 +912,7 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                     }
                 }
             } else if (!encodedData.isEmpty() && encoding == "jpeg-base64") {
-                const bool isFirstFrame = !m_hasLoggedFirstVideoFrame;
-
-                // Rate-limit before doing any of the expensive work below.
-                // The core pushes JPEG fallback frames as fast as it produces
-                // them, uncoordinated with how fast the UI can actually
-                // render them; always process the very first frame so video
-                // activates promptly, but otherwise drop frames that arrive
-                // faster than kJpegEmitMinIntervalMs so we don't build a
-                // large data-URL string (and trigger a QML image decode)
-                // for a frame nobody will ever see. This mirrors the
-                // drop=true backpressure the H.264 GStreamer appsink already
-                // gets for free, which the JPEG path otherwise lacks.
-                if (!isFirstFrame && m_lastJpegEmit.isValid() &&
-                    m_lastJpegEmit.elapsed() < kJpegEmitMinIntervalMs) {
-                    return;
-                }
-                m_lastJpegEmit.restart();
-
-                if (isFirstFrame) {
+                if (!m_hasLoggedFirstVideoFrame) {
                     m_hasLoggedFirstVideoFrame = true;
                     Logger::instance().infoContext(
                         "CoreClient", "First android-auto/media/video-frame event received",
@@ -948,6 +930,16 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
                          {"encoded_size", encodedData.size()}});
                 }
 
+                // CoreClient forwards every arriving frame 1:1 via
+                // videoFrameReceived (relied on by callers/tests); it does
+                // not drop frames itself. Building the "data:" URL with
+                // reserve()+append() instead of QString::arg() avoids
+                // arg()'s placeholder-scanning overhead on what's often a
+                // large payload, without changing that per-frame contract.
+                // Actual frame-rate backpressure for slower hardware
+                // belongs downstream, in whatever actually renders these
+                // frames (AndroidAutoFacade already coalesces to a single
+                // pending frame on its own dispatch timer).
                 QString frameUrl;
                 frameUrl.reserve(encodedData.size() + 32);
                 frameUrl.append(QStringLiteral("data:image/jpeg;base64,"));
