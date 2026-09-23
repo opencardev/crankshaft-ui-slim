@@ -115,6 +115,10 @@ private:
     quint64 m_h264EmitCount = 0;
     QElapsedTimer m_lastH264EventArrival;
     QElapsedTimer m_lastH264Emit;
+    // JPEG fallback frames are forwarded 1:1 via videoFrameReceived (relied
+    // on by callers/tests); m_jpegEmitCount is only used for periodic
+    // cadence logging, not for rate-limiting.
+    quint64 m_jpegEmitCount = 0;
     quint64 m_touchEventSendCount = 0;
     bool m_projectionReady = false;
     bool m_videoReady = false;

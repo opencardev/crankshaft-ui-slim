@@ -44,26 +44,46 @@ read_rotation_preference() {
 
 mkdir -p "${RUN_DIR}"
 
-has_connected_display=0
-for status_file in /sys/class/drm/card*-*/status; do
-    if [ ! -f "${status_file}" ]; then
-        continue
-    fi
-
-    connector_dir=$(dirname "${status_file}")
-    connector_name=$(basename "${connector_dir}")
-
-    case "${connector_name}" in
-        *Writeback*|*writeback*)
+detect_connected_display() {
+    for status_file in /sys/class/drm/card*-*/status; do
+        if [ ! -f "${status_file}" ]; then
             continue
-            ;;
-    esac
+        fi
 
-    status_value=$(cat "${status_file}" 2>/dev/null || true)
-    if [ "${status_value}" = "connected" ]; then
+        connector_dir=$(dirname "${status_file}")
+        connector_name=$(basename "${connector_dir}")
+
+        case "${connector_name}" in
+            *Writeback*|*writeback*)
+                continue
+                ;;
+        esac
+
+        status_value=$(cat "${status_file}" 2>/dev/null || true)
+        if [ "${status_value}" = "connected" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# HDMI hotplug detection can still be settling for a moment after the DRM
+# driver loads, particularly on boards that come up slower than others.
+# Retry briefly rather than committing to a permanent (and, once cached in
+# the env file consumed at every subsequent boot until this service reruns,
+# hard to notice) VNC fallback on a board that actually does have a display
+# attached and working, just not detected microseconds after this script
+# started.
+has_connected_display=0
+attempt=1
+max_attempts=10
+while [ "${attempt}" -le "${max_attempts}" ]; do
+    if detect_connected_display; then
         has_connected_display=1
         break
     fi
+    attempt=$((attempt + 1))
+    sleep 0.5
 done
 
 if [ "${has_connected_display}" -eq 1 ]; then
@@ -76,13 +96,13 @@ QT_QPA_EGLFS_ALWAYS_SET_MODE=1
 SLIM_UI_DISPLAY_MODE=physical
 EOF
     printf 'QT_QPA_EGLFS_ROTATION=%s\n' "${display_rotation}" >> "${ENV_FILE}"
-    echo "[crankshaft-ui-slim-display-setup] display detected, selecting physical mode (eglfs)"
+    echo "[crankshaft-ui-slim-display-setup] display detected on attempt ${attempt}/${max_attempts}, selecting physical mode (eglfs)"
 else
     cat > "${ENV_FILE}" << 'EOF'
 QT_QPA_PLATFORM=vnc:size=1280x720:port=5900
 SLIM_UI_DISPLAY_MODE=vnc
 EOF
-    echo "[crankshaft-ui-slim-display-setup] no display detected, selecting VNC mode"
+    echo "[crankshaft-ui-slim-display-setup] no display detected after ${max_attempts} attempts, selecting VNC mode"
 fi
 
 chmod 0644 "${ENV_FILE}"

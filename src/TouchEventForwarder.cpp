@@ -50,8 +50,8 @@ TouchEventForwarder::TouchEventForwarder(AndroidAutoFacade* androidAutoFacade,
 
     // The projection surface can call setDisplaySize() before CoreClient has
     // connected.  In that case the display-resolution publish is dropped.
-    // Re-publish the current resolution when the WebSocket connection becomes
-    // available so the core's touch-coordinate bounds match the UI.
+    // Re-publish the current AA coordinate resolution when the WebSocket
+    // connection becomes available.
     if (auto* coreClient = m_serviceProvider->androidAutoService()) {
         connect(coreClient, &CoreClient::connectionStateChanged, this,
                 [this](int state) {
@@ -107,6 +107,9 @@ auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
             QString("Display size changed to: %1x%2").arg(size.width()).arg(size.height()));
     }
 
+    // The Android Auto touch coordinate space follows the physical display
+    // geometry, not the decoded video frame size.  The projection stream may
+    // be 800x480 while the Pi display/touch surface is 1280x720.
     QSize screenSize;
     qreal devicePixelRatio = 1.0;
     if (const QScreen* screen = QGuiApplication::primaryScreen()) {
@@ -117,8 +120,6 @@ auto TouchEventForwarder::setDisplaySize(const QSize& size) -> void {
     const QSize publishedDisplayResolution =
         resolvePublishedDisplayResolution(size, screenSize, devicePixelRatio);
 
-    // Android Auto touch coordinates use the published display resolution.
-    // Keep this separate from the rendered H.264 frame size.
     setAndroidAutoSize(publishedDisplayResolution);
 
     // Only publish the display resolution to the core service when it has
@@ -297,41 +298,44 @@ void TouchEventForwarder::sendToAndroidAuto(const QString& eventType,
         return;
     }
 
-    // Convert to QVariantList for transmission
+    // Convert to QVariantList for transmission. Avoid constructing detailed
+    // per-point diagnostic strings for high-frequency move events; on RPi3
+    // synchronous logging can compete with video decode/render and input.
     QVariantList pointList;
-    QString pointSummary;
     for (const TouchPoint& point : points) {
         pointList.append(point.toVariantMap());
-        if (!pointSummary.isEmpty()) {
-            pointSummary += QStringLiteral("; ");
-        }
-        pointSummary += QStringLiteral("id=%1 raw=(%2,%3) scaled=(%4,%5) pressure=%6")
-                            .arg(point.id)
-                            .arg(point.position.x(), 0, 'f', 2)
-                            .arg(point.position.y(), 0, 'f', 2)
-                            .arg(point.scaledPosition.x(), 0, 'f', 2)
-                            .arg(point.scaledPosition.y(), 0, 'f', 2)
-                            .arg(point.pressure, 0, 'f', 2);
     }
 
-    Logger::instance().infoContext(
-        "TouchEventForwarder",
-        QString("AA touch forwarding: event=%1 display=%2x%3 aaSize=%4x%5 points=%6 [%7]")
-            .arg(eventType)
-            .arg(m_displaySize.width())
-            .arg(m_displaySize.height())
-            .arg(m_androidAutoSize.width())
-            .arg(m_androidAutoSize.height())
-            .arg(points.size())
-            .arg(pointSummary));
+    const bool logDetailedTouch = eventType == QStringLiteral("press") ||
+                                  eventType == QStringLiteral("release") ||
+                                  eventType == QStringLiteral("cancel");
+    if (logDetailedTouch) {
+        QString pointSummary;
+        for (const TouchPoint& point : points) {
+            if (!pointSummary.isEmpty()) {
+                pointSummary += QStringLiteral("; ");
+            }
+            pointSummary += QStringLiteral("id=%1 raw=(%2,%3) scaled=(%4,%5) pressure=%6")
+                                .arg(point.id)
+                                .arg(point.position.x(), 0, 'f', 2)
+                                .arg(point.position.y(), 0, 'f', 2)
+                                .arg(point.scaledPosition.x(), 0, 'f', 2)
+                                .arg(point.scaledPosition.y(), 0, 'f', 2)
+                                .arg(point.pressure, 0, 'f', 2);
+        }
+        Logger::instance().debugContext(
+            "TouchEventForwarder",
+            QString("AA touch forwarding: event=%1 display=%2x%3 aaSize=%4x%5 points=%6 [%7]")
+                .arg(eventType)
+                .arg(m_displaySize.width())
+                .arg(m_displaySize.height())
+                .arg(m_androidAutoSize.width())
+                .arg(m_androidAutoSize.height())
+                .arg(points.size())
+                .arg(pointSummary));
+    }
 
     aaService->sendTouchEvent(eventType, pointList);
-
-    Logger::instance().infoContext(
-        "TouchEventForwarder",
-        QString("AA touch handed to AndroidAutoService: event=%1 points=%2")
-            .arg(eventType)
-            .arg(points.size()));
 }
 
 bool TouchEventForwarder::shouldForwardMoveEvent(const QString& eventType,
