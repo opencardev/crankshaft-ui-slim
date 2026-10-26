@@ -20,10 +20,28 @@
 #include <QtTest/QtTest>
 
 #include "AudioBridge.h"
+#include "CoreClient.h"
 #include "ServiceProvider.h"
 
 class AudioFailureScenariosTest : public QObject {
     Q_OBJECT
+
+private:
+    // Build an audio/state payload as core sends it.
+    static QVariantMap audioState(bool available, bool backendAvailable = true,
+                                  const QString& backend = QStringLiteral("PipeWire"),
+                                  int volume = 50, bool muted = false, int balance = 0,
+                                  bool duckingEnabled = true) {
+        QVariantMap state;
+        state[QStringLiteral("available")] = available;
+        state[QStringLiteral("backend")] = backend;
+        state[QStringLiteral("backend_available")] = backendAvailable;
+        state[QStringLiteral("volume")] = volume;
+        state[QStringLiteral("muted")] = muted;
+        state[QStringLiteral("balance")] = balance;
+        state[QStringLiteral("ducking_enabled")] = duckingEnabled;
+        return state;
+    }
 
 private slots:
     void init() {
@@ -50,12 +68,54 @@ private slots:
         QVERIFY(bridge.setVolume(100));
     }
 
-    void testShutdownLeavesAudioUnavailable() {
+    void testInvalidBalanceRejected() {
         auto& services = ServiceProvider::instance();
         AudioBridge bridge(&services);
 
-        bridge.shutdown();
+        QVERIFY(!bridge.setBalance(-101));
+        QVERIFY(!bridge.setBalance(101));
+        QVERIFY(bridge.setBalance(-100));
+        QVERIFY(bridge.setBalance(0));
+        QVERIFY(bridge.setBalance(100));
+    }
+
+    void testUnavailableCoreReportsAudioUnavailable() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+
+        emit services.androidAutoService()->audioStateReceived(audioState(false));
+
         QVERIFY(!bridge.isAudioAvailable());
+        QCOMPARE(bridge.audioBackend(), QStringLiteral("None"));
+    }
+
+    void testAudioStateIsMirroredIntoProperties() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+
+        emit services.androidAutoService()->audioStateReceived(
+            audioState(true, true, QStringLiteral("PulseAudio"), 30, true, -20, false));
+
+        QVERIFY(bridge.isAudioAvailable());
+        QCOMPARE(bridge.audioBackend(), QStringLiteral("PulseAudio"));
+        QCOMPARE(bridge.volume(), 30);
+        QVERIFY(bridge.muted());
+        QCOMPARE(bridge.balance(), -20);
+        QVERIFY(!bridge.duckingEnabled());
+    }
+
+    void testAudioStateEmitsStateChangedOnce() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+        QSignalSpy changes(&bridge, &AudioBridge::stateChanged);
+
+        emit services.androidAutoService()->audioStateReceived(audioState(true, true, QStringLiteral("PipeWire"), 70));
+
+        QCOMPARE(changes.count(), 1);
+        QCOMPARE(bridge.volume(), 70);
     }
 };
 
