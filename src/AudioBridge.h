@@ -65,6 +65,8 @@ public:
     Q_INVOKABLE bool setMuted(bool muted);
     Q_INVOKABLE bool setBalance(int balance);  // -100 (left) to 100 (right)
     Q_INVOKABLE bool setDuckingEnabled(bool enabled);
+    // Sends the factory audio values to core: volume 50, unmuted, balance 0, ducking on.
+    Q_INVOKABLE bool resetToDefaults();
     // NOLINTEND(modernize-use-trailing-return-type)
 
 signals:

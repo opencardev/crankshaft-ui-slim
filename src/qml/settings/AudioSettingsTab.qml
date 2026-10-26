@@ -16,12 +16,24 @@ Item {
 
     required property var audioBridge
 
+    // Core reports availability; until it does, the controls are shown disabled.
+    readonly property bool audioAvailable: root.audioBridge ? root.audioBridge.isAudioAvailable : false
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 12
 
+        Label {
+            Layout.fillWidth: true
+            visible: !root.audioAvailable
+            text: qsTr("Audio unavailable: core is not reporting an audio output.", "SettingsPanel")
+            wrapMode: Text.WordWrap
+            font.italic: true
+        }
+
         Components.SettingsCard {
             Layout.fillWidth: true
+            enabled: root.audioAvailable
             title: qsTr("Volume", "SettingsPanel")
 
             Components.SettingsSlider {
@@ -56,6 +68,7 @@ Item {
 
         Components.SettingsCard {
             Layout.fillWidth: true
+            enabled: root.audioAvailable
             title: qsTr("Balance", "SettingsPanel")
 
             Components.SettingsSlider {
@@ -75,6 +88,7 @@ Item {
 
         Components.SettingsCard {
             Layout.fillWidth: true
+            enabled: root.audioAvailable
             title: qsTr("Guidance", "SettingsPanel")
 
             RowLayout {

@@ -32,6 +32,12 @@ constexpr int kVolumeMax = 100;
 constexpr int kBalanceMin = -100;
 constexpr int kBalanceMax = 100;
 
+// Factory values. These match the defaults core applies when it has no stored state.
+constexpr int kDefaultVolume = 50;
+constexpr bool kDefaultMuted = false;
+constexpr int kDefaultBalance = 0;
+constexpr bool kDefaultDuckingEnabled = true;
+
 }  // namespace
 
 AudioBridge::AudioBridge(ServiceProvider* serviceProvider, QObject* parent)
@@ -111,6 +117,23 @@ auto AudioBridge::setBalance(int balance) -> bool {
     QJsonObject payload;
     payload["balance"] = balance;
     m_coreClient->publish(QStringLiteral("audio/balance/set"), payload);
+    return true;
+}
+
+auto AudioBridge::resetToDefaults() -> bool {
+    if (!m_coreClient) {
+        Logger::instance().warningContext("AudioBridge",
+                                          "Audio not reset: core client is not available");
+        return false;
+    }
+
+    // Core owns the audio state, so the reset goes through the same commands as the controls.
+    // Each command produces an audio/state event, so the controls update as core applies them.
+    setVolume(kDefaultVolume);
+    setMuted(kDefaultMuted);
+    setBalance(kDefaultBalance);
+    setDuckingEnabled(kDefaultDuckingEnabled);
+    Logger::instance().infoContext("AudioBridge", "Factory audio values sent to core");
     return true;
 }
 

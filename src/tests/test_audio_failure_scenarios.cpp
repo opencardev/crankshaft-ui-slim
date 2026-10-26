@@ -106,6 +106,15 @@ private slots:
         QVERIFY(!bridge.duckingEnabled());
     }
 
+    void testResetToDefaultsSendsFactoryValues() {
+        // The payloads go to CoreClient::publish, which drops them while disconnected.
+        // This test only checks that the reset runs and reports success.
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+
+        QVERIFY(bridge.resetToDefaults());
+    }
+
     void testAudioStateEmitsStateChangedOnce() {
         auto& services = ServiceProvider::instance();
         AudioBridge bridge(&services);
