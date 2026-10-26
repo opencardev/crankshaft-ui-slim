@@ -38,6 +38,18 @@ constexpr bool kDefaultMuted = false;
 constexpr int kDefaultBalance = 0;
 constexpr bool kDefaultDuckingEnabled = true;
 
+// Keeps only the outputs that have an id, since the id is what the user selects.
+QVariantList usableOutputs(const QVariantList& listed) {
+    QVariantList outputs;
+    for (const QVariant& entry : listed) {
+        const QVariantMap output = entry.toMap();
+        if (!output.value(QStringLiteral("id")).toString().isEmpty()) {
+            outputs.append(output);
+        }
+    }
+    return outputs;
+}
+
 }  // namespace
 
 AudioBridge::AudioBridge(ServiceProvider* serviceProvider, QObject* parent)
@@ -64,6 +76,12 @@ auto AudioBridge::muted() const -> bool { return m_muted; }
 auto AudioBridge::balance() const -> int { return m_balance; }
 
 auto AudioBridge::duckingEnabled() const -> bool { return m_duckingEnabled; }
+
+auto AudioBridge::outputs() const -> QVariantList { return m_outputs; }
+
+auto AudioBridge::selectedOutput() const -> QString { return m_selectedOutput; }
+
+auto AudioBridge::activeOutput() const -> QString { return m_activeOutput; }
 
 // Q_INVOKABLE methods
 auto AudioBridge::initialize() -> bool {
@@ -148,6 +166,18 @@ auto AudioBridge::setDuckingEnabled(bool enabled) -> bool {
     return true;
 }
 
+auto AudioBridge::setOutputDevice(const QString& id) -> bool {
+    if (!m_coreClient) {
+        return false;
+    }
+
+    // Core checks the id against its listing, so this only sends the request.
+    QJsonObject payload;
+    payload["device"] = id;
+    m_coreClient->publish(QStringLiteral("audio/output/set"), payload);
+    return true;
+}
+
 // Private methods
 auto AudioBridge::applyState(const QVariantMap& state) -> void {
     const bool available = state.value(QStringLiteral("available"), false).toBool();
@@ -155,6 +185,9 @@ auto AudioBridge::applyState(const QVariantMap& state) -> void {
         // Core has no audio router (for example, mock mode). Keep the last values but mark unavailable.
         m_isAudioAvailable = false;
         m_audioBackend = QStringLiteral("None");
+        m_outputs.clear();
+        m_selectedOutput.clear();
+        m_activeOutput.clear();
         emit stateChanged();
         return;
     }
@@ -165,6 +198,9 @@ auto AudioBridge::applyState(const QVariantMap& state) -> void {
     m_muted = state.value(QStringLiteral("muted"), m_muted).toBool();
     m_balance = state.value(QStringLiteral("balance"), m_balance).toInt();
     m_duckingEnabled = state.value(QStringLiteral("ducking_enabled"), m_duckingEnabled).toBool();
+    m_outputs = usableOutputs(state.value(QStringLiteral("outputs")).toList());
+    m_selectedOutput = state.value(QStringLiteral("output")).toString();
+    m_activeOutput = state.value(QStringLiteral("active_output")).toString();
 
     Logger::instance().debugContext(
         "AudioBridge",

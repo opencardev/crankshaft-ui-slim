@@ -126,6 +126,83 @@ private slots:
         QCOMPARE(changes.count(), 1);
         QCOMPARE(bridge.volume(), 70);
     }
+
+    void testOutputListIsMirroredFromCore() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+
+        QVariantMap wired;
+        wired[QStringLiteral("id")] = QStringLiteral("alsa_output.stereo-fallback");
+        wired[QStringLiteral("name")] = QStringLiteral("Built-in Audio");
+        wired[QStringLiteral("bluetooth")] = false;
+        QVariantMap speaker;
+        speaker[QStringLiteral("id")] = QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1");
+        speaker[QStringLiteral("name")] = QStringLiteral("Car Speaker");
+        speaker[QStringLiteral("bluetooth")] = true;
+
+        QVariantMap state = audioState(true);
+        state[QStringLiteral("outputs")] = QVariantList{wired, speaker};
+        state[QStringLiteral("output")] = QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1");
+        state[QStringLiteral("active_output")] = QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1");
+        emit services.androidAutoService()->audioStateReceived(state);
+
+        QCOMPARE(bridge.outputs().size(), 2);
+        QCOMPARE(bridge.outputs().at(1).toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Car Speaker"));
+        QCOMPARE(bridge.selectedOutput(), QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1"));
+        QCOMPARE(bridge.activeOutput(), QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1"));
+    }
+
+    void testOutputsWithoutAnIdAreDropped() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+
+        QVariantMap nameless;
+        nameless[QStringLiteral("name")] = QStringLiteral("No id");
+        QVariantMap usable;
+        usable[QStringLiteral("id")] = QStringLiteral("hdmi_output");
+        usable[QStringLiteral("name")] = QStringLiteral("HDMI");
+
+        QVariantMap state = audioState(true);
+        state[QStringLiteral("outputs")] = QVariantList{nameless, usable};
+        emit services.androidAutoService()->audioStateReceived(state);
+
+        QCOMPARE(bridge.outputs().size(), 1);
+        QCOMPARE(bridge.outputs().at(0).toMap().value(QStringLiteral("id")).toString(),
+                 QStringLiteral("hdmi_output"));
+    }
+
+    void testUnavailableCoreClearsOutputs() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(services.androidAutoService() != nullptr);
+
+        QVariantMap usable;
+        usable[QStringLiteral("id")] = QStringLiteral("hdmi_output");
+        QVariantMap state = audioState(true);
+        state[QStringLiteral("outputs")] = QVariantList{usable};
+        state[QStringLiteral("output")] = QStringLiteral("hdmi_output");
+        emit services.androidAutoService()->audioStateReceived(state);
+        QCOMPARE(bridge.outputs().size(), 1);
+
+        emit services.androidAutoService()->audioStateReceived(audioState(false));
+
+        QVERIFY(bridge.outputs().isEmpty());
+        QVERIFY(bridge.selectedOutput().isEmpty());
+        QVERIFY(bridge.activeOutput().isEmpty());
+    }
+
+    void testSetOutputDeviceAcceptedWhenCoreClientAvailable() {
+        // The payload goes to CoreClient::publish, which drops it while disconnected.
+        // This test only checks that the request is accepted for sending.
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+
+        QVERIFY(bridge.setOutputDevice(QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1")));
+        QVERIFY(bridge.setOutputDevice(QString()));
+    }
 };
 
 QTEST_MAIN(AudioFailureScenariosTest)
