@@ -150,7 +150,7 @@ Dialog {
                         }
 
                         SettingsTabs.AudioSettingsTab {
-                            preferencesFacade: _preferencesFacade
+                            audioBridge: _audioBridge
                         }
 
                         SettingsTabs.ConnectionSettingsTab {

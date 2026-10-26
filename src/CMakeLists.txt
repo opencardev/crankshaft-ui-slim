@@ -126,8 +126,6 @@ qt_add_executable(crankshaft-ui-slim
     SettingsMigration.cpp
     DisplayBrightnessController.h
     DisplayBrightnessController.cpp
-    AudioVolumeController.h
-    AudioVolumeController.cpp
     DeviceManager.h
     DeviceManager.cpp
     AudioBridge.h

@@ -22,67 +22,64 @@
 
 #include <QObject>
 #include <QString>
+#include <QVariantMap>
 
+class CoreClient;
 class ServiceProvider;
 
+/**
+ * @brief QML-facing control surface for core-owned audio.
+ *
+ * Core owns playback, master volume, mute, balance and ducking. This class holds
+ * no audio state of its own: it sends `audio/*` commands to core and mirrors the
+ * `audio/state` event that core sends on subscribe and after every change.
+ */
 class AudioBridge : public QObject {
     Q_OBJECT
 
-    Q_PROPERTY(bool isAudioAvailable READ isAudioAvailable NOTIFY audioAvailabilityChanged)
-    Q_PROPERTY(QString audioBackend READ audioBackend NOTIFY audioBackendChanged)
-    Q_PROPERTY(int bufferSize READ bufferSize NOTIFY bufferSizeChanged)
-    Q_PROPERTY(int sampleRate READ sampleRate NOTIFY sampleRateChanged)
+    Q_PROPERTY(bool isAudioAvailable READ isAudioAvailable NOTIFY stateChanged)
+    Q_PROPERTY(QString audioBackend READ audioBackend NOTIFY stateChanged)
+    Q_PROPERTY(int volume READ volume NOTIFY stateChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY stateChanged)
+    Q_PROPERTY(int balance READ balance NOTIFY stateChanged)
+    Q_PROPERTY(bool duckingEnabled READ duckingEnabled NOTIFY stateChanged)
 
 public:
-    enum AudioBackend { None = 0, ALSA = 1, PulseAudio = 2 };
-    Q_ENUM(AudioBackend)
-
     explicit AudioBridge(ServiceProvider* serviceProvider, QObject* parent = nullptr);
-    ~AudioBridge() override;
+    ~AudioBridge() override = default;
 
     // Property getters
     [[nodiscard]] auto isAudioAvailable() const -> bool;
     [[nodiscard]] auto audioBackend() const -> QString;
-    [[nodiscard]] auto bufferSize() const -> int;
-    [[nodiscard]] auto sampleRate() const -> int;
+    [[nodiscard]] auto volume() const -> int;
+    [[nodiscard]] auto muted() const -> bool;
+    [[nodiscard]] auto balance() const -> int;
+    [[nodiscard]] auto duckingEnabled() const -> bool;
 
     // Q_INVOKABLE methods for QML
     // NOTE: Qt's MOC (Meta-Object Compiler) cannot handle 'auto' keyword in method
     // signatures. Explicit return types are required for Q_INVOKABLE methods.
     // NOLINTBEGIN(modernize-use-trailing-return-type)
     Q_INVOKABLE bool initialize();
-    Q_INVOKABLE void shutdown();
     Q_INVOKABLE bool setVolume(int volume);  // 0-100
+    Q_INVOKABLE bool setMuted(bool muted);
+    Q_INVOKABLE bool setBalance(int balance);  // -100 (left) to 100 (right)
+    Q_INVOKABLE bool setDuckingEnabled(bool enabled);
     // NOLINTEND(modernize-use-trailing-return-type)
 
 signals:
-    void audioAvailabilityChanged(bool available);
-    void audioBackendChanged(const QString& backend);
-    void bufferSizeChanged(int size);
-    void sampleRateChanged(int rate);
-    void audioError(const QString& error);
-    void audioInitialized(const QString& backend);
-    void audioDataReceived(int bytesReceived);
-
-private slots:
-    void onCoreAudioDataAvailable(const QByteArray& data);
-    void onCoreAudioFormatChanged(int sampleRate, int channels, int bitsPerSample);
-    void onCoreAudioError(const QString& error);
+    void stateChanged();
 
 private:
-    auto detectAudioBackend() -> void;
-    auto initializeAudioRouter() -> bool;
-    auto setupEventBusConnections() -> void;
-    auto handleAudioData(const QByteArray& data) -> void;
-    auto reportError(const QString& errorMessage) -> void;
+    auto applyState(const QVariantMap& state) -> void;
 
-    ServiceProvider* m_serviceProvider;
-    AudioBackend m_audioBackend;
-    bool m_isAudioAvailable;
-    int m_bufferSize;
-    int m_sampleRate;
-    int m_channels;
-    int m_bitsPerSample;
+    CoreClient* m_coreClient = nullptr;
+    bool m_isAudioAvailable = false;
+    QString m_audioBackend;
+    int m_volume = 50;
+    bool m_muted = false;
+    int m_balance = 0;
+    bool m_duckingEnabled = true;
 };
 
 #endif  // AUDIOBRIDGE_H
