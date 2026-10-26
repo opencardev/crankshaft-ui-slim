@@ -106,7 +106,6 @@ auto SettingsMigration::migrate(int fromVersion) -> bool {
                                             QStringLiteral("Migration from v1 to v2 failed"));
             return false;
         }
-        fromVersion = 2;
     }
 
     // Update schema version
