@@ -203,6 +203,29 @@ private slots:
         QVERIFY(bridge.setOutputDevice(QStringLiteral("bluez_output.AA_BB_CC_DD_EE_FF.1")));
         QVERIFY(bridge.setOutputDevice(QString()));
     }
+
+    void testBluetoothAutoSelectIsMirroredFromCore() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+        QVERIFY(bridge.bluetoothAutoSelect());  // on by default
+
+        QVariantMap state = audioState(true);
+        state[QStringLiteral("bluetooth_auto_select")] = false;
+        emit services.androidAutoService()->audioStateReceived(state);
+        QVERIFY(!bridge.bluetoothAutoSelect());
+
+        // A state without the key keeps the last value rather than turning the switch on.
+        emit services.androidAutoService()->audioStateReceived(audioState(true));
+        QVERIFY(!bridge.bluetoothAutoSelect());
+    }
+
+    void testSetBluetoothAutoSelectAcceptedWhenCoreClientAvailable() {
+        auto& services = ServiceProvider::instance();
+        AudioBridge bridge(&services);
+
+        QVERIFY(bridge.setBluetoothAutoSelect(false));
+        QVERIFY(bridge.setBluetoothAutoSelect(true));
+    }
 };
 
 QTEST_MAIN(AudioFailureScenariosTest)

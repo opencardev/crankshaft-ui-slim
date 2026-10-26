@@ -44,6 +44,7 @@ class AudioBridge : public QObject {
     Q_PROPERTY(bool muted READ muted NOTIFY stateChanged)
     Q_PROPERTY(int balance READ balance NOTIFY stateChanged)
     Q_PROPERTY(bool duckingEnabled READ duckingEnabled NOTIFY stateChanged)
+    Q_PROPERTY(bool bluetoothAutoSelect READ bluetoothAutoSelect NOTIFY stateChanged)
     Q_PROPERTY(QVariantList outputs READ outputs NOTIFY stateChanged)
     Q_PROPERTY(QString selectedOutput READ selectedOutput NOTIFY stateChanged)
     Q_PROPERTY(QString activeOutput READ activeOutput NOTIFY stateChanged)
@@ -59,6 +60,8 @@ public:
     [[nodiscard]] auto muted() const -> bool;
     [[nodiscard]] auto balance() const -> int;
     [[nodiscard]] auto duckingEnabled() const -> bool;
+    // Switch to a Bluetooth output when its speaker connects. Core decides; this mirrors it.
+    [[nodiscard]] auto bluetoothAutoSelect() const -> bool;
     // Each entry is a map with id, name and bluetooth. The list is core's current listing.
     [[nodiscard]] auto outputs() const -> QVariantList;
     // The chosen output id. Empty means the system default.
@@ -75,6 +78,7 @@ public:
     Q_INVOKABLE bool setMuted(bool muted);
     Q_INVOKABLE bool setBalance(int balance);  // -100 (left) to 100 (right)
     Q_INVOKABLE bool setDuckingEnabled(bool enabled);
+    Q_INVOKABLE bool setBluetoothAutoSelect(bool enabled);
     // Empty id selects the system default. Core rejects ids it does not list.
     Q_INVOKABLE bool setOutputDevice(const QString& id);
     // Sends the factory audio values to core: volume 50, unmuted, balance 0, ducking on.
@@ -94,6 +98,7 @@ private:
     bool m_muted = false;
     int m_balance = 0;
     bool m_duckingEnabled = true;
+    bool m_bluetoothAutoSelect = true;
     QVariantList m_outputs;
     QString m_selectedOutput;
     QString m_activeOutput;

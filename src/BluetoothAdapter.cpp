@@ -80,6 +80,23 @@ void BluetoothAdapter::pairDevice(const QString& address) {
     setStatusMessage(QStringLiteral("Pairing with %1...").arg(address));
 }
 
+void BluetoothAdapter::respondToPairing(bool accept, const QString& answer) {
+    // The answer is sent as typed, and never logged.
+    const QString id = m_pairingPrompt.value("id").toString();
+    if (!m_coreClient || id.isEmpty()) return;
+    QJsonObject payload;
+    payload["id"] = id;
+    payload["accept"] = accept;
+    payload["answer"] = answer;
+    m_coreClient->publish(QStringLiteral("bluetooth/pairing/respond"), payload);
+}
+
+void BluetoothAdapter::dismissPairingDisplay() {
+    if (m_pairingDisplay.isEmpty()) return;
+    m_pairingDisplay.clear();
+    emit pairingDisplayChanged();
+}
+
 void BluetoothAdapter::unpairDevice(const QString& address) {
     if (!m_coreClient || address.isEmpty()) return;
     QJsonObject payload;
@@ -167,6 +184,28 @@ auto BluetoothAdapter::rebuildPairedList() -> void {
     }
 }
 
+auto BluetoothAdapter::pairingPrompt() const -> QVariantMap {
+    return m_pairingPrompt;
+}
+
+auto BluetoothAdapter::pairingDisplay() const -> QVariantMap {
+    return m_pairingDisplay;
+}
+
+auto BluetoothAdapter::clearPairingPrompt() -> void {
+    if (m_pairingPrompt.isEmpty()) return;
+    m_pairingPrompt.clear();
+    emit pairingPromptChanged();
+}
+
+auto BluetoothAdapter::clearPairingState() -> void {
+    clearPairingPrompt();
+    if (!m_pairingDisplay.isEmpty()) {
+        m_pairingDisplay.clear();
+        emit pairingDisplayChanged();
+    }
+}
+
 void BluetoothAdapter::onBluetoothEvent(const QString& topic, const QVariantMap& payload) {
     if (topic == QLatin1String("bluetooth/enabled/result")) {
         const bool enabled = payload.value("enabled").toBool();
@@ -211,6 +250,7 @@ void BluetoothAdapter::onBluetoothEvent(const QString& topic, const QVariantMap&
     } else if (topic == QLatin1String("bluetooth/pair/result")) {
         const QString address = payload.value("address", payload.value("id")).toString();
         const bool success = payload.value("success").toBool();
+        clearPairingState();
         if (success) {
             for (int i = 0; i < m_discoveredAudioDevices.size(); ++i) {
                 QVariantMap device = m_discoveredAudioDevices[i].toMap();
@@ -231,6 +271,35 @@ void BluetoothAdapter::onBluetoothEvent(const QString& topic, const QVariantMap&
             setLastError(payload.value("error").toString());
             setStatusMessage(QStringLiteral("Pairing failed"));
         }
+
+    } else if (topic == QLatin1String("bluetooth/pairing/request")) {
+        m_pairingPrompt = payload;
+        emit pairingPromptChanged();
+        const QString name = payload.value("name").toString();
+        setStatusMessage(QStringLiteral("Answer the pairing request from %1").arg(name));
+
+    } else if (topic == QLatin1String("bluetooth/pairing/display")) {
+        m_pairingDisplay = payload;
+        emit pairingDisplayChanged();
+
+    } else if (topic == QLatin1String("bluetooth/pairing/closed")) {
+        if (payload.value("id").toString() == m_pairingPrompt.value("id").toString()) {
+            clearPairingPrompt();
+        }
+
+    } else if (topic == QLatin1String("bluetooth/pairing/rejected")) {
+        const QString reason = payload.value("reason").toString();
+        if (reason == QLatin1String("invalid_answer")) {
+            // The prompt stays open, so the user can correct the answer.
+            setLastError(QStringLiteral("That answer is not valid. Check it and try again."));
+            return;
+        }
+        if (payload.value("id").toString() == m_pairingPrompt.value("id").toString()) {
+            clearPairingPrompt();
+        }
+        setLastError(reason == QLatin1String("unknown_prompt")
+                         ? QStringLiteral("That pairing request has expired")
+                         : QStringLiteral("The pairing answer was not sent"));
 
     } else if (topic == QLatin1String("bluetooth/connect/result")) {
         const QString address = payload.value("address", payload.value("id")).toString();

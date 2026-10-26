@@ -77,6 +77,8 @@ auto AudioBridge::balance() const -> int { return m_balance; }
 
 auto AudioBridge::duckingEnabled() const -> bool { return m_duckingEnabled; }
 
+auto AudioBridge::bluetoothAutoSelect() const -> bool { return m_bluetoothAutoSelect; }
+
 auto AudioBridge::outputs() const -> QVariantList { return m_outputs; }
 
 auto AudioBridge::selectedOutput() const -> QString { return m_selectedOutput; }
@@ -166,6 +168,17 @@ auto AudioBridge::setDuckingEnabled(bool enabled) -> bool {
     return true;
 }
 
+auto AudioBridge::setBluetoothAutoSelect(bool enabled) -> bool {
+    if (!m_coreClient) {
+        return false;
+    }
+
+    QJsonObject payload;
+    payload["enabled"] = enabled;
+    m_coreClient->publish(QStringLiteral("audio/bluetooth_auto_select/set"), payload);
+    return true;
+}
+
 auto AudioBridge::setOutputDevice(const QString& id) -> bool {
     if (!m_coreClient) {
         return false;
@@ -198,6 +211,8 @@ auto AudioBridge::applyState(const QVariantMap& state) -> void {
     m_muted = state.value(QStringLiteral("muted"), m_muted).toBool();
     m_balance = state.value(QStringLiteral("balance"), m_balance).toInt();
     m_duckingEnabled = state.value(QStringLiteral("ducking_enabled"), m_duckingEnabled).toBool();
+    m_bluetoothAutoSelect =
+        state.value(QStringLiteral("bluetooth_auto_select"), m_bluetoothAutoSelect).toBool();
     m_outputs = usableOutputs(state.value(QStringLiteral("outputs")).toList());
     m_selectedOutput = state.value(QStringLiteral("output")).toString();
     m_activeOutput = state.value(QStringLiteral("active_output")).toString();

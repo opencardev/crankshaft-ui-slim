@@ -82,6 +82,25 @@ Item {
                 }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Switch to a Bluetooth speaker when it connects", "SettingsPanel")
+                    wrapMode: Text.WordWrap
+                }
+
+                Switch {
+                    checked: root.audioBridge ? root.audioBridge.bluetoothAutoSelect : true
+                    onToggled: {
+                        if (root.audioBridge) {
+                            root.audioBridge.setBluetoothAutoSelect(checked)
+                        }
+                    }
+                }
+            }
+
             Label {
                 Layout.fillWidth: true
                 visible: root.outputFallback

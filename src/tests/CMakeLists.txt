@@ -113,6 +113,12 @@ add_slim_ui_test(
 )
 
 add_slim_ui_test(
+    test_bluetooth_pairing_adapter
+    SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/test_bluetooth_pairing_adapter.cpp
+    EXTRA_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../BluetoothAdapter.cpp
+)
+
+add_slim_ui_test(
     test_architecture_decoupling
     SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/test_architecture_decoupling.cpp
 )
