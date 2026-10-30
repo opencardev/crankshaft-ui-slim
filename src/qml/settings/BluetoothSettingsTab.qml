@@ -448,4 +448,119 @@ Item {
             }
         }
     }
+
+    // A PIN, passkey or confirmation that BlueZ is waiting on, or a code to type on the device.
+    // Parsing and validation happen in core. The popup only collects the answer.
+    readonly property var pairingPrompt: root.bt ? root.bt.pairingPrompt : ({})
+    readonly property var pairingDisplay: root.bt ? root.bt.pairingDisplay : ({})
+    readonly property bool hasPairingPrompt: pairingPrompt.id !== undefined
+    readonly property bool hasPairingDisplay: pairingDisplay.code !== undefined
+    readonly property bool pairingOpen: hasPairingPrompt || hasPairingDisplay
+
+    onPairingOpenChanged: {
+        if (pairingOpen) {
+            pairingAnswerField.text = ""
+            pairingPopup.open()
+        } else {
+            pairingPopup.close()
+        }
+    }
+
+    function pairingDeviceLabel() {
+        const source = root.hasPairingPrompt ? root.pairingPrompt : root.pairingDisplay
+        return source.name || source.address || ""
+    }
+
+    Popup {
+        id: pairingPopup
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(420, root.width * 0.9)
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        padding: 16
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 12
+
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.bold: true
+                text: {
+                    if (root.hasPairingDisplay && !root.hasPairingPrompt) {
+                        return qsTr("Type this code on %1 to pair", "SettingsPanel").arg(root.pairingDeviceLabel())
+                    }
+                    if (root.pairingPrompt.kind === "confirm") {
+                        return qsTr("Does the code on %1 match?", "SettingsPanel").arg(root.pairingDeviceLabel())
+                    }
+                    if (root.pairingPrompt.kind === "passkey") {
+                        return qsTr("Enter the passkey shown on %1", "SettingsPanel").arg(root.pairingDeviceLabel())
+                    }
+                    return qsTr("Enter the PIN for %1", "SettingsPanel").arg(root.pairingDeviceLabel())
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                font.pointSize: 22
+                font.bold: true
+                text: root.hasPairingDisplay && !root.hasPairingPrompt
+                      ? root.pairingDisplay.code
+                      : (root.pairingPrompt.kind === "confirm" ? root.pairingPrompt.passkey : "")
+                visible: text !== ""
+            }
+
+            TextField {
+                id: pairingAnswerField
+                Layout.fillWidth: true
+                visible: root.hasPairingPrompt && root.pairingPrompt.kind !== "confirm"
+                echoMode: TextInput.Normal
+                maximumLength: root.pairingPrompt.kind === "passkey" ? 6 : 16
+                inputMethodHints: root.pairingPrompt.kind === "passkey" ? Qt.ImhDigitsOnly : Qt.ImhNone
+                placeholderText: root.pairingPrompt.kind === "passkey"
+                                 ? qsTr("Up to six digits", "SettingsPanel")
+                                 : qsTr("PIN", "SettingsPanel")
+                onAccepted: acceptPairingButton.clicked()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    visible: root.hasPairingPrompt
+                    text: root.pairingPrompt.kind === "confirm"
+                          ? qsTr("No", "SettingsPanel")
+                          : qsTr("Cancel", "SettingsPanel")
+                    onClicked: root.bt.respondToPairing(false, "")
+                }
+
+                Button {
+                    id: acceptPairingButton
+                    visible: root.hasPairingPrompt
+                    highlighted: true
+                    enabled: root.pairingPrompt.kind === "confirm" || pairingAnswerField.text.length > 0
+                    text: root.pairingPrompt.kind === "confirm"
+                          ? qsTr("Yes", "SettingsPanel")
+                          : qsTr("Pair", "SettingsPanel")
+                    onClicked: root.bt.respondToPairing(true, pairingAnswerField.text)
+                }
+
+                Button {
+                    visible: root.hasPairingDisplay && !root.hasPairingPrompt
+                    highlighted: true
+                    text: qsTr("Close", "SettingsPanel")
+                    onClicked: root.bt.dismissPairingDisplay()
+                }
+            }
+        }
+    }
 }

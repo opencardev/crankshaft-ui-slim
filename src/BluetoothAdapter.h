@@ -47,6 +47,8 @@ class BluetoothAdapter : public QObject {
         bool hasConnectedAudioDevice READ hasConnectedAudioDevice NOTIFY connectedAudioChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(QVariantMap pairingPrompt READ pairingPrompt NOTIFY pairingPromptChanged)
+    Q_PROPERTY(QVariantMap pairingDisplay READ pairingDisplay NOTIFY pairingDisplayChanged)
 
 public:
     explicit BluetoothAdapter(CoreClient* coreClient, QObject* parent = nullptr);
@@ -59,6 +61,11 @@ public:
     [[nodiscard]] auto hasConnectedAudioDevice() const -> bool;
     [[nodiscard]] auto statusMessage() const -> QString;
     [[nodiscard]] auto lastError() const -> QString;
+    /// The question BlueZ is waiting on: id, kind (pin, passkey or confirm), address, name,
+    /// passkey (confirm only), timeout_seconds. Empty when nothing is pending.
+    [[nodiscard]] auto pairingPrompt() const -> QVariantMap;
+    /// A code to type on the device: address and code. Empty when nothing is shown.
+    [[nodiscard]] auto pairingDisplay() const -> QVariantMap;
 
 public slots:
     void setBtEnabled(bool enabled);
@@ -66,6 +73,10 @@ public slots:
     void stopDiscovery();
     void pairDevice(const QString& address);
     void unpairDevice(const QString& address);
+    /// Answer the pending prompt. An accepted answer is sent to core, which validates it.
+    Q_INVOKABLE void respondToPairing(bool accept, const QString& answer);
+    /// Hide the code shown for the user to type on the device.
+    Q_INVOKABLE void dismissPairingDisplay();
     void connectAudioDevice(const QString& address);
     void disconnectAudioDevice();
     void refreshDevices();
@@ -79,6 +90,8 @@ signals:
     void connectedAudioChanged();
     void statusMessageChanged(const QString& message);
     void lastErrorChanged(const QString& error);
+    void pairingPromptChanged();
+    void pairingDisplayChanged();
     void deviceDiscovered(const QString& name, const QString& address);
     void devicePaired(const QString& name, const QString& address);
     void deviceUnpaired(const QString& name, const QString& address);
@@ -91,6 +104,8 @@ private slots:
 private:
     auto setStatusMessage(const QString& message) -> void;
     auto setLastError(const QString& error) -> void;
+    auto clearPairingPrompt() -> void;
+    auto clearPairingState() -> void;
     auto upsertDevice(const QVariantMap& device) -> void;
     auto removeDevice(const QString& address) -> void;
     auto rebuildPairedList() -> void;
@@ -102,6 +117,8 @@ private:
     QString m_connectedAudioName;
     QString m_statusMessage;
     QString m_lastError;
+    QVariantMap m_pairingPrompt;
+    QVariantMap m_pairingDisplay;
     QVariantList m_discoveredAudioDevices;
     QVariantList m_pairedAudioDevices;
 };

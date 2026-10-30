@@ -97,17 +97,16 @@ auto SettingsMigration::migrate(int fromVersion) -> bool {
                                             QStringLiteral("Migration from v0 to v1 failed"));
             return false;
         }
-        // Update local variable for next iteration
-        // Note: this only affects the local copy; the preference is updated below
+        fromVersion = 1;
     }
 
-    // Future migrations would go here:
-    // if (fromVersion == 1) {
-    //     if (!migrateV1ToV2()) {
-    //         return false;
-    //     }
-    //     fromVersion = 2;
-    // }
+    if (fromVersion == 1) {
+        if (!migrateV1ToV2()) {
+            Logger::instance().errorContext(QStringLiteral("SettingsMigration"),
+                                            QStringLiteral("Migration from v1 to v2 failed"));
+            return false;
+        }
+    }
 
     // Update schema version
     if (!m_preferencesService->set(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION)) {
@@ -161,7 +160,6 @@ auto SettingsMigration::recoverToDefaults() -> bool {
     // Set all factory defaults
     bool success = true;
     success &= m_preferencesService->set(KEY_DISPLAY_BRIGHTNESS, FactoryDefaults::BRIGHTNESS);
-    success &= m_preferencesService->set(KEY_AUDIO_VOLUME, FactoryDefaults::VOLUME);
     success &= m_preferencesService->set(KEY_CONNECTION_PREFERENCE,
                                          FactoryDefaults::CONNECTION_PREFERENCE);
     success &= m_preferencesService->set(KEY_THEME_MODE, FactoryDefaults::THEME_MODE);
@@ -193,12 +191,6 @@ auto SettingsMigration::initializeDefaults() -> bool {
     // Initialize missing settings with defaults
     if (!m_preferencesService->contains(KEY_DISPLAY_BRIGHTNESS)) {
         if (m_preferencesService->set(KEY_DISPLAY_BRIGHTNESS, FactoryDefaults::BRIGHTNESS)) {
-            initialized = true;
-        }
-    }
-
-    if (!m_preferencesService->contains(KEY_AUDIO_VOLUME)) {
-        if (m_preferencesService->set(KEY_AUDIO_VOLUME, FactoryDefaults::VOLUME)) {
             initialized = true;
         }
     }
@@ -238,7 +230,7 @@ auto SettingsMigration::initializeDefaults() -> bool {
 }
 
 auto SettingsMigration::validateSetting(const QString& key, const QVariant& value) const -> bool {
-    if (key == KEY_DISPLAY_BRIGHTNESS || key == KEY_AUDIO_VOLUME) {
+    if (key == KEY_DISPLAY_BRIGHTNESS) {
         return validatePercentage(value);
     }
 
@@ -268,8 +260,8 @@ auto SettingsMigration::validateSetting(const QString& key, const QVariant& valu
 }
 
 QStringList SettingsMigration::getRequiredSettingKeys() {
-    return QStringList{KEY_DISPLAY_BRIGHTNESS, KEY_AUDIO_VOLUME, KEY_CONNECTION_PREFERENCE,
-                       KEY_THEME_MODE, KEY_LAST_CONNECTED_DEVICE_ID};
+    return QStringList{KEY_DISPLAY_BRIGHTNESS, KEY_CONNECTION_PREFERENCE, KEY_THEME_MODE,
+                       KEY_LAST_CONNECTED_DEVICE_ID};
 }
 
 auto SettingsMigration::migrateV0ToV1() -> bool {
@@ -290,6 +282,27 @@ auto SettingsMigration::migrateV0ToV1() -> bool {
 
     // Initialize any missing settings
     return initializeDefaults();
+}
+
+auto SettingsMigration::migrateV1ToV2() -> bool {
+    // Version 1 to Version 2 migration
+    // The audio volume is owned by core (audio/state). The stored UI copy is
+    // never read again, so remove it rather than leave a stale value behind.
+
+    Logger::instance().infoContext(QStringLiteral("SettingsMigration"),
+                                   QStringLiteral("Migrating from version 1 to version 2"));
+
+    if (!m_preferencesService->contains(KEY_AUDIO_VOLUME)) {
+        return true;
+    }
+
+    if (!m_preferencesService->remove(KEY_AUDIO_VOLUME)) {
+        Logger::instance().errorContext(QStringLiteral("SettingsMigration"),
+                                        QStringLiteral("Failed to remove obsolete audio volume"));
+        return false;
+    }
+
+    return true;
 }
 
 auto SettingsMigration::validatePercentage(const QVariant& value) const -> bool {

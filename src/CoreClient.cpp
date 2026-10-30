@@ -276,6 +276,12 @@ auto CoreClient::subscribeToTopics() -> void {
     btSubscription["topic"] = "bluetooth/#";
     m_webSocket->sendTextMessage(QJsonDocument(btSubscription).toJson(QJsonDocument::Compact));
 
+    // Core sends the current audio state on subscribe and after every audio/* change
+    QJsonObject audioSubscription;
+    audioSubscription["type"] = "subscribe";
+    audioSubscription["topic"] = "audio/state";
+    m_webSocket->sendTextMessage(QJsonDocument(audioSubscription).toJson(QJsonDocument::Compact));
+
     Logger::instance().infoContext("CoreClient",
                                    "Subscribed to android-auto/status/*, android-auto/media/*, android-auto/webrtc/*, bluetooth/#");
 }
@@ -955,6 +961,8 @@ auto CoreClient::parseAndHandleEvent(const QJsonDocument& doc) -> void {
             emit webRtcSignalingReceived(topic, payload.toVariantMap());
         } else if (topic.startsWith(QStringLiteral("bluetooth/"))) {
             emit bluetoothEventReceived(topic, payload.toVariantMap());
+        } else if (topic == QStringLiteral("audio/state")) {
+            emit audioStateReceived(payload.toVariantMap());
         }
 
     } else if (msgType == "error") {

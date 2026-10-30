@@ -19,231 +19,212 @@
 
 #include "AudioBridge.h"
 
-#include <QFile>
+#include <QJsonObject>
 
 #include "CoreClient.h"
 #include "Logger.h"
 #include "ServiceProvider.h"
 
+namespace {
+
+constexpr int kVolumeMin = 0;
+constexpr int kVolumeMax = 100;
+constexpr int kBalanceMin = -100;
+constexpr int kBalanceMax = 100;
+
+// Factory values. These match the defaults core applies when it has no stored state.
+constexpr int kDefaultVolume = 50;
+constexpr bool kDefaultMuted = false;
+constexpr int kDefaultBalance = 0;
+constexpr bool kDefaultDuckingEnabled = true;
+
+// Keeps only the outputs that have an id, since the id is what the user selects.
+QVariantList usableOutputs(const QVariantList& listed) {
+    QVariantList outputs;
+    for (const QVariant& entry : listed) {
+        const QVariantMap output = entry.toMap();
+        if (!output.value(QStringLiteral("id")).toString().isEmpty()) {
+            outputs.append(output);
+        }
+    }
+    return outputs;
+}
+
+}  // namespace
+
 AudioBridge::AudioBridge(ServiceProvider* serviceProvider, QObject* parent)
     : QObject(parent),
-      m_serviceProvider(serviceProvider),
-      m_audioBackend(AudioBackend::None),
-      m_isAudioAvailable(false),
-      m_bufferSize(4096),
-      m_sampleRate(48000),
-      m_channels(2),
-      m_bitsPerSample(16) {
-    if (!m_serviceProvider) {
-        Logger::instance().errorContext("AudioBridge", "ServiceProvider is null");
+      m_coreClient(serviceProvider ? serviceProvider->androidAutoService() : nullptr),
+      m_audioBackend(QStringLiteral("None")) {
+    if (!m_coreClient) {
+        Logger::instance().errorContext("AudioBridge", "Core client not available; audio controls disabled");
         return;
     }
 
-    // Detect available audio backend
-    detectAudioBackend();
-
-    Logger::instance().infoContext("AudioBridge", "Initialized");
-}
-
-AudioBridge::~AudioBridge() {
-    shutdown();
-    Logger::instance().infoContext("AudioBridge", "Shutting down");
+    connect(m_coreClient, &CoreClient::audioStateReceived, this, &AudioBridge::applyState);
 }
 
 // Property getters
 auto AudioBridge::isAudioAvailable() const -> bool { return m_isAudioAvailable; }
 
-auto AudioBridge::audioBackend() const -> QString {
-    switch (m_audioBackend) {
-        case AudioBackend::ALSA:
-            return "ALSA";
-        case AudioBackend::PulseAudio:
-            return "PulseAudio";
-        case AudioBackend::None:
-        default:
-            return "None";
-    }
-}
+auto AudioBridge::audioBackend() const -> QString { return m_audioBackend; }
 
-auto AudioBridge::bufferSize() const -> int { return m_bufferSize; }
+auto AudioBridge::volume() const -> int { return m_volume; }
 
-auto AudioBridge::sampleRate() const -> int { return m_sampleRate; }
+auto AudioBridge::muted() const -> bool { return m_muted; }
+
+auto AudioBridge::balance() const -> int { return m_balance; }
+
+auto AudioBridge::duckingEnabled() const -> bool { return m_duckingEnabled; }
+
+auto AudioBridge::bluetoothAutoSelect() const -> bool { return m_bluetoothAutoSelect; }
+
+auto AudioBridge::outputs() const -> QVariantList { return m_outputs; }
+
+auto AudioBridge::selectedOutput() const -> QString { return m_selectedOutput; }
+
+auto AudioBridge::activeOutput() const -> QString { return m_activeOutput; }
 
 // Q_INVOKABLE methods
 auto AudioBridge::initialize() -> bool {
-    Logger::instance().infoContext("AudioBridge", "Initializing audio system");
-
-    if (m_audioBackend == AudioBackend::None) {
-        Logger::instance().warningContext("AudioBridge",
-                                          "No audio backend detected, running in silent mode");
-        emit audioError("No audio backend available");
+    if (!m_coreClient) {
         return false;
     }
 
-    // Initialize AudioRouter via ServiceProvider
-    if (!initializeAudioRouter()) {
-        Logger::instance().errorContext("AudioBridge", "Failed to initialize AudioRouter");
-        reportError("Audio initialization failed");
-        return false;
-    }
-
-    // Setup EventBus connections for audio data
-    setupEventBusConnections();
-
-    m_isAudioAvailable = true;
-    emit audioAvailabilityChanged(true);
-    emit audioInitialized(audioBackend());
-
-    Logger::instance().infoContext(
-        "AudioBridge",
-        QString("Audio system initialized with backend: %1, sample rate: %2 Hz, buffer: %3 bytes")
-            .arg(audioBackend())
-            .arg(m_sampleRate)
-            .arg(m_bufferSize));
-
+    // Availability and current values arrive as an audio/state event once the
+    // WebSocket is subscribed. Until then the controls show defaults.
+    Logger::instance().infoContext("AudioBridge", "Audio controls bound to core");
     return true;
 }
 
-auto AudioBridge::shutdown() -> void {
-    if (!m_isAudioAvailable) {
-        return;
-    }
-
-    Logger::instance().infoContext("AudioBridge", "Shutting down audio system");
-
-    m_isAudioAvailable = false;
-    emit audioAvailabilityChanged(false);
-}
-
 auto AudioBridge::setVolume(int volume) -> bool {
-    if (volume < 0 || volume > 100) {
+    if (volume < kVolumeMin || volume > kVolumeMax) {
         Logger::instance().warningContext(
             "AudioBridge", QString("Invalid volume level: %1 (must be 0-100)").arg(volume));
         return false;
     }
-
-    auto* coreClient = m_serviceProvider->androidAutoService();
-    if (!coreClient) {
-        Logger::instance().warningContext("AudioBridge",
-                                          "Core client not available, cannot set volume");
+    if (!m_coreClient) {
         return false;
     }
 
-    // TODO: Set volume via AudioRouter once API is confirmed
-    // audioRouter->setVolume(volume / 100.0f); // Convert to 0.0-1.0
-
-    Logger::instance().debugContext("AudioBridge", QString("Volume set to: %1%").arg(volume));
-
+    QJsonObject payload;
+    payload["volume"] = volume;
+    m_coreClient->publish(QStringLiteral("audio/volume/set"), payload);
     return true;
 }
 
-// Private slots
-auto AudioBridge::onCoreAudioDataAvailable(const QByteArray& data) -> void {
-    if (!m_isAudioAvailable) {
-        return;
+auto AudioBridge::setMuted(bool muted) -> bool {
+    if (!m_coreClient) {
+        return false;
     }
 
-    handleAudioData(data);
-    emit audioDataReceived(data.size());
+    QJsonObject payload;
+    payload["muted"] = muted;
+    m_coreClient->publish(QStringLiteral("audio/mute/set"), payload);
+    return true;
 }
 
-auto AudioBridge::onCoreAudioFormatChanged(int sampleRate, int channels, int bitsPerSample)
-    -> void {
-    Logger::instance().infoContext("AudioBridge",
-                                   QString("Audio format changed: %1 Hz, %2 channels, %3 bits")
-                                       .arg(sampleRate)
-                                       .arg(channels)
-                                       .arg(bitsPerSample));
+auto AudioBridge::setBalance(int balance) -> bool {
+    if (balance < kBalanceMin || balance > kBalanceMax) {
+        Logger::instance().warningContext(
+            "AudioBridge", QString("Invalid balance: %1 (must be -100 to 100)").arg(balance));
+        return false;
+    }
+    if (!m_coreClient) {
+        return false;
+    }
 
-    m_sampleRate = sampleRate;
-    m_channels = channels;
-    m_bitsPerSample = bitsPerSample;
-
-    emit sampleRateChanged(m_sampleRate);
+    QJsonObject payload;
+    payload["balance"] = balance;
+    m_coreClient->publish(QStringLiteral("audio/balance/set"), payload);
+    return true;
 }
 
-auto AudioBridge::onCoreAudioError(const QString& error) -> void {
-    Logger::instance().errorContext("AudioBridge", QString("Core audio error: %1").arg(error));
+auto AudioBridge::resetToDefaults() -> bool {
+    if (!m_coreClient) {
+        Logger::instance().warningContext("AudioBridge",
+                                          "Audio not reset: core client is not available");
+        return false;
+    }
 
-    reportError(error);
+    // Core owns the audio state, so the reset goes through the same commands as the controls.
+    // Each command produces an audio/state event, so the controls update as core applies them.
+    setVolume(kDefaultVolume);
+    setMuted(kDefaultMuted);
+    setBalance(kDefaultBalance);
+    setDuckingEnabled(kDefaultDuckingEnabled);
+    Logger::instance().infoContext("AudioBridge", "Factory audio values sent to core");
+    return true;
+}
+
+auto AudioBridge::setDuckingEnabled(bool enabled) -> bool {
+    if (!m_coreClient) {
+        return false;
+    }
+
+    QJsonObject payload;
+    payload["enabled"] = enabled;
+    m_coreClient->publish(QStringLiteral("audio/ducking/set"), payload);
+    return true;
+}
+
+auto AudioBridge::setBluetoothAutoSelect(bool enabled) -> bool {
+    if (!m_coreClient) {
+        return false;
+    }
+
+    QJsonObject payload;
+    payload["enabled"] = enabled;
+    m_coreClient->publish(QStringLiteral("audio/bluetooth_auto_select/set"), payload);
+    return true;
+}
+
+auto AudioBridge::setOutputDevice(const QString& id) -> bool {
+    if (!m_coreClient) {
+        return false;
+    }
+
+    // Core checks the id against its listing, so this only sends the request.
+    QJsonObject payload;
+    payload["device"] = id;
+    m_coreClient->publish(QStringLiteral("audio/output/set"), payload);
+    return true;
 }
 
 // Private methods
-auto AudioBridge::detectAudioBackend() -> void {
-    // Check for PulseAudio first (preferred on modern Linux)
-    if (QFile::exists("/usr/bin/pulseaudio") || QFile::exists("/usr/bin/pactl") ||
-        qEnvironmentVariableIsSet("PULSE_SERVER")) {
-        m_audioBackend = AudioBackend::PulseAudio;
-        Logger::instance().infoContext("AudioBridge", "Detected PulseAudio backend");
+auto AudioBridge::applyState(const QVariantMap& state) -> void {
+    const bool available = state.value(QStringLiteral("available"), false).toBool();
+    if (!available) {
+        // Core has no audio router (for example, mock mode). Keep the last values but mark unavailable.
+        m_isAudioAvailable = false;
+        m_audioBackend = QStringLiteral("None");
+        m_outputs.clear();
+        m_selectedOutput.clear();
+        m_activeOutput.clear();
+        emit stateChanged();
         return;
     }
 
-    // Check for ALSA
-    if (QFile::exists("/proc/asound/version") || QFile::exists("/dev/snd") ||
-        QFile::exists("/usr/share/alsa")) {
-        m_audioBackend = AudioBackend::ALSA;
-        Logger::instance().infoContext("AudioBridge", "Detected ALSA backend");
-        return;
-    }
+    m_isAudioAvailable = state.value(QStringLiteral("backend_available"), false).toBool();
+    m_audioBackend = state.value(QStringLiteral("backend"), QStringLiteral("None")).toString();
+    m_volume = state.value(QStringLiteral("volume"), m_volume).toInt();
+    m_muted = state.value(QStringLiteral("muted"), m_muted).toBool();
+    m_balance = state.value(QStringLiteral("balance"), m_balance).toInt();
+    m_duckingEnabled = state.value(QStringLiteral("ducking_enabled"), m_duckingEnabled).toBool();
+    m_bluetoothAutoSelect =
+        state.value(QStringLiteral("bluetooth_auto_select"), m_bluetoothAutoSelect).toBool();
+    m_outputs = usableOutputs(state.value(QStringLiteral("outputs")).toList());
+    m_selectedOutput = state.value(QStringLiteral("output")).toString();
+    m_activeOutput = state.value(QStringLiteral("active_output")).toString();
 
-    // No audio backend detected
-    m_audioBackend = AudioBackend::None;
-    Logger::instance().warningContext("AudioBridge",
-                                      "No audio backend detected (checked PulseAudio and ALSA)");
-}
+    Logger::instance().debugContext(
+        "AudioBridge",
+        QString("Audio state: backend=%1 volume=%2 muted=%3 balance=%4 ducking=%5")
+            .arg(m_audioBackend)
+            .arg(m_volume)
+            .arg(m_muted)
+            .arg(m_balance)
+            .arg(m_duckingEnabled));
 
-auto AudioBridge::initializeAudioRouter() -> bool {
-    auto* coreClient = m_serviceProvider->androidAutoService();
-    if (!coreClient) {
-        Logger::instance().errorContext("AudioBridge", "Core client service not available");
-        return false;
-    }
-
-    // TODO: Initialize AudioRouter with detected backend once API is confirmed
-    // bool success = audioRouter->initialize(audioBackend());
-    // if (!success) {
-    //     Logger::instance().errorContext("AudioBridge",
-    //                 "AudioRouter initialization failed");
-    //     return false;
-    // }
-
-    Logger::instance().infoContext(
-        "AudioBridge", QString("AudioRouter initialized with %1 backend").arg(audioBackend()));
-
-    return true;
-}
-
-auto AudioBridge::setupEventBusConnections() -> void {
-    auto* coreClient = m_serviceProvider->androidAutoService();
-    if (!coreClient) {
-        Logger::instance().warningContext("AudioBridge",
-                                          "Core client not available for audio events");
-        return;
-    }
-
-    connect(coreClient, &CoreClient::audioStateChanged, this, [this](bool active) {
-        if (!active) {
-            emit audioDataReceived(0);
-        }
-    });
-
-    Logger::instance().debugContext("AudioBridge", "Core client audio connections set up");
-}
-
-auto AudioBridge::handleAudioData(const QByteArray& data) -> void {
-    auto* coreClient = m_serviceProvider->androidAutoService();
-    if (!coreClient) {
-        return;
-    }
-
-    // TODO: Route audio data to output via AudioRouter once API is confirmed
-    // audioRouter->writeAudioData(data);
-
-    Logger::instance().debugContext("AudioBridge",
-                                    QString("Processed %1 bytes of audio data").arg(data.size()));
-}
-
-auto AudioBridge::reportError(const QString& errorMessage) -> void {
-    emit audioError(errorMessage);
-    Logger::instance().errorContext("AudioBridge", errorMessage);
+    emit stateChanged();
 }

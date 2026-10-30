@@ -52,9 +52,6 @@ class PreferencesFacade : public QObject {
                        aaProjectionFullscreenDelaySecondsChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
 
-    // Audio settings
-    Q_PROPERTY(int audioVolume READ audioVolume WRITE setAudioVolume NOTIFY audioVolumeChanged)
-
     // Connection settings
     Q_PROPERTY(QString connectionPreference READ connectionPreference WRITE setConnectionPreference
                    NOTIFY connectionPreferenceChanged)
@@ -88,7 +85,6 @@ public:
     [[nodiscard]] auto displayBrightness() const -> int;
     [[nodiscard]] auto displayRotation() const -> int;
     [[nodiscard]] auto aaProjectionFullscreenDelaySeconds() const -> int;
-    [[nodiscard]] auto audioVolume() const -> int;
     [[nodiscard]] auto connectionPreference() const -> QString;
     [[nodiscard]] auto themeMode() const -> QString;
     [[nodiscard]] auto lastConnectedDeviceId() const -> QString;
@@ -97,7 +93,6 @@ public:
     void setDisplayBrightness(int value);
     void setDisplayRotation(int value);
     void setAaProjectionFullscreenDelaySeconds(int value);
-    void setAudioVolume(int value);
     void setConnectionPreference(const QString& mode);
     auto setThemeMode(const QString& mode) -> void;
     auto setLastConnectedDeviceId(const QString& deviceId) -> void;
@@ -115,7 +110,6 @@ signals:
     void displayBrightnessChanged(int value);
     void displayRotationChanged(int value);
     void aaProjectionFullscreenDelaySecondsChanged(int value);
-    void audioVolumeChanged(int value);
     void connectionPreferenceChanged(const QString& mode);
     void themeModeChanged(const QString& mode);
     void lastConnectedDeviceIdChanged(const QString& deviceId);
@@ -173,7 +167,6 @@ private:
     int m_displayBrightness = 50;                            ///< Default 50%
     int m_displayRotation = 0;                               ///< Default 0 degrees
     int m_aaProjectionFullscreenDelaySeconds = 0;            ///< 0 disables delayed fullscreen
-    int m_audioVolume = 50;                                  ///< Default 50%
     QString m_connectionPreference = QStringLiteral("USB");  ///< Default USB
     QString m_themeMode = QStringLiteral("DARK");            ///< Default dark
     QString m_lastConnectedDeviceId;

@@ -71,6 +71,8 @@ signals:
     void deviceRemoved(const QString& deviceId);
     void connectedDeviceChanged(const QString& deviceName);
     void audioStateChanged(bool active);
+    /// Core-owned audio state (volume, mute, balance, ducking, backend) from the audio/state event
+    void audioStateReceived(const QVariantMap& state);
     void videoStateChanged(bool active);
     void projectionReadyChanged(bool ready);
     void videoFrameReceived(const QString& frameUrl, int width, int height);

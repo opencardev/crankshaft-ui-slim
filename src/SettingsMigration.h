@@ -36,7 +36,7 @@ public:
     /**
      * @brief Schema version constants
      */
-    static constexpr int CURRENT_SCHEMA_VERSION = 1;
+    static constexpr int CURRENT_SCHEMA_VERSION = 2;
     static constexpr const char* SCHEMA_VERSION_KEY = "slim_ui.schema.version";
 
     /**
@@ -44,7 +44,6 @@ public:
      */
     struct FactoryDefaults {
         static constexpr int BRIGHTNESS = 50;
-        static constexpr int VOLUME = 50;
         static constexpr const char* CONNECTION_PREFERENCE = "USB";
         static constexpr const char* THEME_MODE = "DARK";
     };
@@ -133,6 +132,17 @@ private:
      * @return false if migration failed
      */
     auto migrateV0ToV1() -> bool;
+
+    /**
+     * @brief Migrate from version 1 to version 2
+     *
+     * The audio volume is owned by core now, so the stored slim_ui.audio.volume
+     * setting is removed.
+     *
+     * @return true if migration succeeded
+     * @return false if migration failed
+     */
+    auto migrateV1ToV2() -> bool;
 
     /**
      * @brief Validate percentage value (0-100)

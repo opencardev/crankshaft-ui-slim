@@ -77,8 +77,25 @@ private slots:
         QVERIFY(migration.initializeDefaults());
 
         QVERIFY(service.contains(QStringLiteral("slim_ui.display.brightness")));
-        QVERIFY(service.contains(QStringLiteral("slim_ui.audio.volume")));
+        QVERIFY(!service.contains(QStringLiteral("slim_ui.audio.volume")));
         QVERIFY(service.contains(QStringLiteral("slim_ui.theme.mode")));
+        QCOMPARE(service.get(QStringLiteral("slim_ui.schema.version")).toInt(),
+                 SettingsMigration::CURRENT_SCHEMA_VERSION);
+    }
+
+    void testMigrationFromV1RemovesObsoleteVolume() {
+        QVERIFY(m_tempDir.isValid());
+        const QString path = m_tempDir.path() + QStringLiteral("/migration_v1.ini");
+
+        PreferencesService service(path);
+        QVERIFY(service.initialize());
+        QVERIFY(service.set(QStringLiteral("slim_ui.audio.volume"), 80));
+        QVERIFY(service.set(QStringLiteral("slim_ui.schema.version"), 1));
+
+        SettingsMigration migration(&service);
+        QVERIFY(migration.migrate(1));
+
+        QVERIFY(!service.contains(QStringLiteral("slim_ui.audio.volume")));
         QCOMPARE(service.get(QStringLiteral("slim_ui.schema.version")).toInt(),
                  SettingsMigration::CURRENT_SCHEMA_VERSION);
     }
